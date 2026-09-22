@@ -208,6 +208,40 @@ def _store_strikes(con, conflict_id: str, strikes: list, art: dict) -> int:
     return n
 
 
+SEA = re.compile(r"\b(sea|strait|gulf|ocean|waters|channel|bay|coast|maritime|canal|offshore|island)s?\b", re.I)
+
+
+def fix_epicenter(c: dict) -> dict:
+    """Keep the model's epicenter only if it lies in a combatant country; otherwise
+    resolve its label through the gazetteer or fall back to the main combatant's centroid."""
+    ep = c.get("epicenter") or {}
+    parties = c.get("parties") or []
+    combat = [p.get("country") for p in parties if p.get("role") == "combatant" and p.get("country")]
+    hosts = combat or [p.get("country") for p in parties if p.get("country")]
+    lat, lon = ep.get("lat"), ep.get("lon")
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        lat = lon = None
+    if lat is not None and SEA.search(ep.get("label") or ""):
+        return c  # maritime epicenters (straits, seas, gulfs) legitimately sit outside any country
+    if lat is not None:
+        for cc in hosts:
+            iso = geo.countries.iso3(cc)
+            if iso and geo.point_in_country(lon, lat, iso, pad=0.75):
+                return c
+    for cc in hosts:
+        r = geo.resolve(ep.get("label"), cc, None, None)
+        if r and r["precision"] == "city":
+            c["epicenter"] = {"lat": r["lat"], "lon": r["lon"], "label": ep.get("label") or r["name"], "fixed": "city"}
+            return c
+    if hosts:
+        r = geo.resolve(None, hosts[0])
+        if r:
+            c["epicenter"] = {"lat": r["lat"], "lon": r["lon"], "label": ep.get("label") or r["name"], "fixed": "country"}
+    return c
+
+
 def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
     with db() as con:
         rows = con.execute(
@@ -249,6 +283,7 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
     with db() as con:
         for c in conflicts:
             prev = by_id.get(c["id"], {})
+            fix_epicenter(c)
             # sources: keep unique links from cited article ids
             sources = {s["link"]: s for s in prev.get("sources", [])}
             for d in c.get("developments", []):
