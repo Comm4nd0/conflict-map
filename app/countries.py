@@ -45,7 +45,8 @@ def table() -> dict:
         lat, lon = _centroid(f["geometry"])
         rec = {"iso3": iso3, "iso2": iso2 if iso2 and iso2 != "-99" else None,
                "fips": fips if fips and fips != "-99" else None,
-               "name": p.get("NAME_EN") or p.get("NAME"), "lat": lat, "lon": lon}
+               "name": p.get("NAME_EN") or p.get("NAME"), "label": p.get("NAME") or p.get("NAME_EN"),
+               "lat": lat, "lon": lon}
         by_iso3[iso3] = rec
         if p.get("ISO_A3") and p["ISO_A3"] != "-99":
             by_iso3.setdefault(p["ISO_A3"], rec)

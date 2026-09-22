@@ -5,7 +5,7 @@ const STATUS_COLOR = {
 };
 const SIDE_COLOR = { A: "#3987e5", B: "#d95926", other: "#9085e9" };
 const WEAPON_COLOR = { missile: "#ffffff", drone: "#eda100", airstrike: "#e87ba4", artillery: "#c3c2b7", naval: "#1baf7a", other: "#9085e9" };
-const LAND = "#3a3a42", HEAT = "#f2a33a";
+const LAND = "#3f4048", HEAT = "#f2a33a";
 
 let COUNTRIES = {};          // iso3 -> {iso3, iso2, name, lat, lon}
 let STATE = null;            // last /api/state
@@ -50,23 +50,44 @@ function arc(from, to, n = 40) {
 }
 
 /* ---------- map ---------- */
+const OCEAN = "#070b14";
 const map = new maplibregl.Map({
   container: "map",
   style: {
     version: 8,
-    sources: {},
-    layers: [{ id: "bg", type: "background", paint: { "background-color": "#121214", "background-color-transition": { duration: 450 } } }],
+    glyphs: "/static/fonts/{fontstack}/{range}.pbf",
+    projection: { type: "globe" },
+    sky: {
+      "sky-color": "#06080f", "horizon-color": "#1c2a48", "fog-color": "#06080f",
+      "sky-horizon-blend": 0.6, "horizon-fog-blend": 0.6, "fog-ground-blend": 0.6,
+      "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 6, 1, 8, 0],
+    },
+    sources: {
+      relief: { type: "raster", tiles: ["/static/tiles/{z}/{x}/{y}.jpg"], tileSize: 512, minzoom: 0, maxzoom: 4 },
+    },
+    layers: [
+      { id: "bg", type: "background", paint: { "background-color": OCEAN, "background-color-transition": { duration: 450 } } },
+      { id: "relief", type: "raster", source: "relief", paint: { "raster-opacity": 1, "raster-fade-duration": 150 } },
+    ],
   },
-  center: [20, 25], zoom: 1.6, minZoom: 1, maxZoom: 8, attributionControl: false, preserveDrawingBuffer: true,
+  center: [25, 22], zoom: 2.25, minZoom: 0.8, maxZoom: 9, attributionControl: false, preserveDrawingBuffer: true,
+  maxPitch: 0,
 });
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+let hoverIso = null;
 
 map.on("load", async () => {
-  map.addSource("countries", { type: "geojson", data: "/static/data/countries.geojson", promoteId: "ADM0_A3" });
+  map.addSource("countries", { type: "geojson", data: "/static/data/ne_50m_admin_0_countries.geojson", promoteId: "ADM0_A3" });
+  map.addSource("lakes", { type: "geojson", data: "/static/data/ne_50m_lakes.geojson" });
+  map.addSource("rivers", { type: "geojson", data: "/static/data/ne_50m_rivers_lake_centerlines.geojson" });
+  map.addSource("admin1", { type: "geojson", data: "/static/data/ne_50m_admin_1_states_provinces_lines.geojson" });
+  map.addSource("places", { type: "geojson", data: "/static/data/places.geojson" });
+  map.addSource("labels", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addSource("points", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addSource("arcs", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addSource("garcs", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
 
+  // land tint: heat / side colour over the relief
   map.addLayer({
     id: "country-fill", type: "fill", source: "countries",
     paint: {
@@ -77,18 +98,42 @@ map.on("load", async () => {
         ["==", ["feature-state", "side"], "other"], SIDE_COLOR.other,
         ["interpolate", ["linear"], ["coalesce", ["feature-state", "heat"], 0], 0, LAND, 1, HEAT],
       ],
-      "fill-opacity": ["case", ["boolean", ["feature-state", "involved"], false], 0.55, 1],
+      "fill-opacity": [
+        "case",
+        ["boolean", ["feature-state", "involved"], false], 0.5,
+        ["+", 0.12, ["*", 0.6, ["coalesce", ["feature-state", "heat"], 0]]],
+      ],
+      "fill-opacity-transition": { duration: 300 },
     },
+  });
+  map.addLayer({ id: "lakes", type: "fill", source: "lakes", paint: { "fill-color": "#0c1424", "fill-opacity": 0.9 } });
+  map.addLayer({
+    id: "rivers", type: "line", source: "rivers", minzoom: 3,
+    paint: { "line-color": "#1d2d4d", "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.4, 7, 1.2], "line-opacity": 0.8 },
+  });
+  map.addLayer({
+    id: "admin1", type: "line", source: "admin1", minzoom: 4,
+    paint: { "line-color": "rgba(255,255,255,0.08)", "line-width": 0.5, "line-dasharray": [3, 2] },
+  });
+  // soft glow along coasts and borders, then the crisp border line
+  map.addLayer({
+    id: "country-glow", type: "line", source: "countries",
+    paint: { "line-color": "#7fa6e0", "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.5, 6, 4], "line-blur": 4, "line-opacity": 0.22 },
   });
   map.addLayer({
     id: "country-line", type: "line", source: "countries",
-    paint: { "line-color": "rgba(255,255,255,0.12)", "line-width": 0.6 },
+    paint: { "line-color": "rgba(210,225,255,0.22)", "line-width": ["interpolate", ["linear"], ["zoom"], 1, 0.5, 6, 1.1] },
+  });
+  map.addLayer({
+    id: "country-hover", type: "line", source: "countries",
+    paint: { "line-color": "#ffffff", "line-width": 1.6,
+             "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.7, 0] },
   });
   map.addLayer({
     id: "country-involved", type: "line", source: "countries",
     paint: {
       "line-color": ["match", ["feature-state", "side"], "A", SIDE_COLOR.A, "B", SIDE_COLOR.B, SIDE_COLOR.other],
-      "line-width": 1.6, "line-opacity": ["case", ["boolean", ["feature-state", "involved"], false], 1, 0],
+      "line-width": 1.8, "line-opacity": ["case", ["boolean", ["feature-state", "involved"], false], 1, 0],
     },
   });
   map.addLayer({
@@ -105,7 +150,7 @@ map.on("load", async () => {
   // focus mode: darkens everything not involved in the selected conflict
   map.addLayer({
     id: "country-dim", type: "fill", source: "countries",
-    paint: { "fill-color": "#08080a", "fill-opacity": 0, "fill-opacity-transition": { duration: 450 } },
+    paint: { "fill-color": "#04050a", "fill-opacity": 0, "fill-opacity-transition": { duration: 450 } },
   });
   map.addLayer({
     id: "garcs", type: "line", source: "garcs", layout: { visibility: "none" },
@@ -121,13 +166,47 @@ map.on("load", async () => {
     },
   });
 
+  // ---- labels: capitals, cities, country names
+  map.addLayer({
+    id: "capital-dots", type: "circle", source: "places", minzoom: 2.5,
+    filter: ["==", ["get", "adm0cap"], 1],
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 2.5, 1.5, 6, 3.5], "circle-color": "#e8ecf5",
+             "circle-stroke-color": "rgba(0,0,0,0.6)", "circle-stroke-width": 1, "circle-opacity": 0.85 },
+  });
+  map.addLayer({
+    id: "city-dots", type: "circle", source: "places", minzoom: 4.5,
+    filter: ["all", ["!=", ["get", "adm0cap"], 1], ["<=", ["get", "scalerank"], 6]],
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 4.5, 1, 8, 2.5], "circle-color": "#c3c2b7", "circle-opacity": 0.7 },
+  });
+  const cityLabel = (id, minzoom, filter, size, color) => map.addLayer({
+    id, type: "symbol", source: "places", minzoom, filter,
+    layout: { "text-field": ["get", "name"], "text-font": ["Open Sans Regular"], "text-size": size,
+              "text-offset": [0.6, 0], "text-anchor": "left", "text-max-width": 8, "text-padding": 4 },
+    paint: { "text-color": color, "text-halo-color": "rgba(0,0,0,0.85)", "text-halo-width": 1.2, "text-halo-blur": 0.5 },
+  });
+  cityLabel("capital-labels", 3, ["==", ["get", "adm0cap"], 1], ["interpolate", ["linear"], ["zoom"], 3, 10, 7, 13], "#e8ecf5");
+  cityLabel("city-labels", 4.8, ["all", ["!=", ["get", "adm0cap"], 1], ["<=", ["get", "scalerank"], 6]],
+            ["interpolate", ["linear"], ["zoom"], 4.8, 9.5, 8, 12], "#c3c2b7");
+  cityLabel("town-labels", 6.5, ["all", ["!=", ["get", "adm0cap"], 1], [">", ["get", "scalerank"], 6]], 10, "#a9a89f");
+  map.addLayer({
+    id: "country-labels", type: "symbol", source: "labels", minzoom: 1.4, maxzoom: 7.5,
+    layout: {
+      "text-field": ["get", "name"], "text-font": ["Open Sans Semibold"], "text-transform": "uppercase",
+      "text-letter-spacing": 0.15, "text-max-width": 7,
+      "text-size": ["interpolate", ["linear"], ["zoom"], 1.4, 8, 3, 11, 6, 15],
+      "symbol-sort-key": ["get", "rank"],
+    },
+    paint: { "text-color": "rgba(230,235,245,0.75)", "text-halo-color": "rgba(0,0,0,0.7)", "text-halo-width": 1.2,
+             "text-opacity": ["interpolate", ["linear"], ["zoom"], 1.4, 0.6, 3, 0.9] },
+  });
+
   // ---- strikes: paths, impacts, animated projectiles, impact flashes
   for (const id of ["strike-paths", "strike-impacts", "projectiles", "flashes"])
     map.addSource(id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
     id: "strike-paths", type: "line", source: "strike-paths",
     paint: { "line-color": ["get", "color"], "line-width": 1, "line-opacity": ["case", ["get", "dim"], 0.08, 0.3] },
-  });
+  }, "capital-dots");
   map.addLayer({
     id: "flashes", type: "circle", source: "flashes",
     paint: {
@@ -136,17 +215,19 @@ map.on("load", async () => {
       "circle-stroke-color": ["get", "color"], "circle-stroke-width": 1.5, "circle-stroke-opacity": ["get", "a"],
       "circle-blur": 0.4,
     },
-  });
+  }, "capital-dots");
   map.addLayer({
     id: "strike-impacts", type: "circle", source: "strike-impacts",
     paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, ["get", "r"], 6, ["*", 2.2, ["get", "r"]]],
+      "circle-radius": ["case", ["==", ["get", "precision"], "country"],
+        ["interpolate", ["linear"], ["zoom"], 1, 10, 6, 16],
+        ["interpolate", ["linear"], ["zoom"], 1, ["get", "r"], 6, ["*", 2.2, ["get", "r"]]]],
       "circle-color": ["get", "color"],
       "circle-opacity": ["case", ["get", "dim"], 0.15, ["case", ["==", ["get", "precision"], "country"], 0.08, 0.55]],
       "circle-stroke-color": ["get", "color"], "circle-stroke-width": 1.2,
       "circle-stroke-opacity": ["case", ["get", "dim"], 0.15, 0.9],
     },
-  });
+  }, "capital-dots");
   map.addLayer({
     id: "projectiles", type: "circle", source: "projectiles",
     paint: { "circle-radius": 3, "circle-color": ["get", "color"], "circle-blur": 0.2,
@@ -164,6 +245,20 @@ map.on("load", async () => {
     const p = e.features[0].properties;
     new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(e.lngLat)
       .setHTML(strikeHtml(p) + (p.link ? `<br><a href="${esc(p.link)}" target="_blank">${esc(p.title || "source")} ↗</a>` : "")).addTo(map);
+  });
+
+  // hover outline
+  map.on("mousemove", "country-fill", (e) => {
+    const iso = e.features[0].properties.ADM0_A3;
+    if (iso !== hoverIso) {
+      if (hoverIso) map.setFeatureState({ source: "countries", id: hoverIso }, { hover: false });
+      map.setFeatureState({ source: "countries", id: iso }, { hover: true });
+      hoverIso = iso;
+    }
+  });
+  map.on("mouseleave", "country-fill", () => {
+    if (hoverIso) map.setFeatureState({ source: "countries", id: hoverIso }, { hover: false });
+    hoverIso = null;
   });
 
   // hover tooltip on countries
@@ -194,6 +289,15 @@ map.on("load", async () => {
 
 async function loadCountries() {
   COUNTRIES = await (await fetch("/api/countries")).json();
+  const seen = new Set();
+  const feats = [];
+  for (const c of Object.values(COUNTRIES)) {
+    if (seen.has(c.iso3) || !c.name) continue;
+    seen.add(c.iso3);
+    feats.push({ type: "Feature", geometry: { type: "Point", coordinates: [c.lon, c.lat] },
+                 properties: { name: (c.label || c.name).replace("United States of America", "United States"), rank: (c.label || c.name).length } });
+  }
+  map.getSource("labels").setData({ type: "FeatureCollection", features: feats });
 }
 
 /* ---------- data ---------- */
@@ -249,7 +353,7 @@ function renderMarkers() {
     const ep = c.epicenter; if (!ep || typeof ep.lat !== "number") continue;
     const el = document.createElement("div");
     const size = 8 + (c.severity || 1) * 3;
-    el.className = "mk" + (selected && selected !== c.id ? " dim" : "");
+    el.className = "mk" + (selected && selected !== c.id ? " dim" : "") + (selected === c.id ? " selected" : "");
     el.style.width = el.style.height = size + "px";
     el.style.background = STATUS_COLOR[c.status] || STATUS_COLOR.active;
     el.style.color = STATUS_COLOR[c.status] || STATUS_COLOR.active;
@@ -305,9 +409,12 @@ function applyInvolvement() {
 function setFocus(on) {
   map.setPaintProperty("country-dim", "fill-opacity",
     on ? ["case", ["boolean", ["feature-state", "involved"], false], 0, 0.78] : 0);
-  map.setPaintProperty("bg", "background-color", on ? "#0a0a0c" : "#121214");
+  map.setPaintProperty("bg", "background-color", on ? "#03040a" : OCEAN);
+  map.setPaintProperty("relief", "raster-opacity", on ? 0.45 : 1);
   map.setPaintProperty("heat", "heatmap-opacity", on ? 0.25 : 0.7);
-  map.setPaintProperty("country-line", "line-color", on ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.12)");
+  map.setPaintProperty("country-glow", "line-opacity", on ? 0.08 : 0.22);
+  map.setPaintProperty("country-line", "line-color", on ? "rgba(210,225,255,0.08)" : "rgba(210,225,255,0.22)");
+  autoRotate.paused = on;
 }
 
 /* which conflicts is a country a party to? */
@@ -418,7 +525,7 @@ function renderStrikes() {
     const to = [st.target_lon, st.target_lat];
     const r = 3 + Math.min(6, Math.log2(1 + (st.launched || 1)));
     impacts.push({ type: "Feature", geometry: { type: "Point", coordinates: to },
-      properties: { ...st, color, dim, r: st.target_precision === "country" ? 14 : r, precision: st.target_precision } });
+      properties: { ...st, color, dim, r, precision: st.target_precision } });
     let path = null;
     if (st.origin_lat != null && st.origin_precision !== "country" || (st.origin_lat != null && st.target_precision !== "country")) {
       path = trajectory([st.origin_lon, st.origin_lat], to);
@@ -459,6 +566,24 @@ function tickStrikes() {
 function setStrikeVisibility(on) {
   for (const id of ["strike-paths", "strike-impacts", "projectiles", "flashes"]) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
 }
+
+/* ---------- globe / idle rotation ---------- */
+const autoRotate = { paused: false, lastInteraction: performance.now(), on: true };
+function rotateTick() {
+  const idle = performance.now() - autoRotate.lastInteraction > 8000;
+  if (autoRotate.on && !autoRotate.paused && idle && !selected && !document.hidden && map.getZoom() < 3.2) {
+    const c = map.getCenter();
+    map.jumpTo({ center: [c.lng + 0.035, c.lat] });
+  }
+  requestAnimationFrame(rotateTick);
+}
+for (const ev of ["mousedown", "wheel", "touchstart", "dragstart", "zoomstart"]) map.on(ev, () => { autoRotate.lastInteraction = performance.now(); });
+requestAnimationFrame(rotateTick);
+$("#tg-globe").addEventListener("change", e => {
+  map.setProjection({ type: e.target.checked ? "globe" : "mercator" });
+  autoRotate.on = e.target.checked;
+});
+$("#tg-rotate").addEventListener("change", e => { autoRotate.on = e.target.checked; });
 
 /* ---------- controls ---------- */
 $("#tg-strikes").addEventListener("change", e => setStrikeVisibility(e.target.checked));

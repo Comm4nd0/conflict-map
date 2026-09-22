@@ -2,7 +2,7 @@
   --page: #0d0d0d;
   --surface: #121214;
   --surface-2: #232322;
-  --land: #3a3a42;
+  --land: #3f4048;
   --border: rgba(255,255,255,0.10);
   --ink: #ffffff;
   --ink-2: #c3c2b7;
@@ -43,7 +43,11 @@ button:disabled { opacity: .5; cursor: default; }
 .status { font-size: 12px; color: var(--muted); min-width: 220px; text-align: right; }
 
 #main { flex: 1; display: flex; min-height: 0; }
-#map { flex: 1; background: var(--surface); }
+#map { flex: 1; background: #070b14; position: relative; }
+#map::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%); }
+.mk.selected { box-shadow: 0 0 18px 4px currentColor; }
+.mk.selected::after { animation-duration: 1.4s; border-width: 3px; }
 #panel { width: 380px; border-left: 1px solid var(--border); background: var(--surface); overflow-y: auto; }
 
 /* list */

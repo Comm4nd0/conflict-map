@@ -21,9 +21,15 @@ who is backing whom, and what the consequences are.
    (`http://127.0.0.1:8080/v1`) in batches of 40, together with the existing conflict
    records. The model returns updated/new conflict records: parties (side + role),
    consequences by category, latest developments with source citations, an epicenter.
-4. **Map** – MapLibre GL with vendored Natural Earth polygons (no external tiles).
-   Conflict markers sized by severity and coloured by status; dashed arcs from
-   supporters/mediators to the epicenter; click a conflict to highlight its parties.
+4. **Map** – MapLibre GL 5 (vendored) in globe projection with atmosphere, or flat
+   Mercator via the Globe toggle; idle globe slowly spins. Basemap is fully local:
+   dark-tinted shaded relief with seabed, built from Natural Earth GRAY_50M_SR_OB by
+   `scripts/build_tiles.py` into `static/tiles/` (512px tiles, z0-4, ~4 MB), plus 50m
+   country polygons, lakes, rivers and admin-1 lines, and Open Sans glyphs in
+   `static/fonts/` for country/capital/city labels. Conflict markers sized by severity
+   and coloured by status; dashed arcs from supporters/mediators to the epicenter;
+   click a conflict (or a country) to focus: parties keep their side colour, everything
+   else darkens.
 
 5. **Strikes** – the model also lists strikes reported in each batch (weapon, origin,
    target, launched/intercepted counts, outcome, source). Place names are resolved
@@ -36,6 +42,13 @@ who is backing whom, and what the consequences are.
 
 Everything lives in `data/conflict.db` (SQLite). Nothing leaves the machine except
 the fetches to GDELT and the RSS feeds.
+
+Rebuild the relief tiles (only needed if you change the colours in the script):
+
+```bash
+curl -LO https://naciscdn.org/naturalearth/50m/raster/GRAY_50M_SR_OB.zip && unzip GRAY_50M_SR_OB.zip -d /tmp/gray
+uv run --with pillow --with numpy python scripts/build_tiles.py /tmp/gray/GRAY_50M_SR_OB.tif
+```
 
 ## Run
 

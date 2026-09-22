@@ -61,7 +61,7 @@ Rules:
 - Be factual and neutral. Cite the article ids that support each development. Never invent developments not in the batch.
 - Strikes: ONLY strikes reported in THIS batch of news items (never from memory). One entry per named target place per attack; if an article lists several cities hit, emit one entry per city. If the target is only given as a country or region, put that in "place" and set lat/lon to your best estimate. Origin is usually a region ("Crimea", "Iran", "Russia") - give its ISO3 and a rough lat/lon. Use exact numbers from the article for launched/intercepted, else null. Omit "strikes" entirely if the batch reports none for that conflict.
 - Dates: use the article's date. Today is {{today}}.
-- Output valid JSON only, no markdown fences, no commentary."""
+- Output valid JSON only, no markdown fences, no commentary. Use COMPACT JSON (no indentation or line breaks) - the output must stay short."""
 
 
 def _compact_existing(conflicts: list[dict]) -> list[dict]:
@@ -80,16 +80,66 @@ def _compact_existing(conflicts: list[dict]) -> list[dict]:
     return out
 
 
+def _repair_json(text: str) -> str:
+    """Drop mismatched closing brackets and close anything left open (models
+    occasionally emit `}}]}` where `}]}` was meant, or stop mid-way)."""
+    out, stack, in_str, esc = [], [], False, False
+    pairs = {"{": "}", "[": "]"}
+    for ch in text:
+        if in_str:
+            out.append(ch)
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in pairs:
+            stack.append(pairs[ch])
+        elif ch in "}]":
+            if stack and stack[-1] == ch:
+                stack.pop()
+            else:
+                continue  # stray closer: skip it
+        out.append(ch)
+    if in_str:
+        out.append('"')
+    # strip a dangling comma before closing what is still open
+    while out and out[-1] in ", \n\t":
+        out.pop()
+    out.extend(reversed(stack))
+    return "".join(out)
+
+
 def _parse_json(text: str) -> dict:
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+    start = text.find("{")
+    if start > 0:
+        text = text[start:]
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(text[start:end + 1])
-        raise
+        pass
+    try:
+        return json.loads(_repair_json(text))
+    except json.JSONDecodeError:
+        pass
+    # last resort: cut back to the previous closing brace, repair, retry
+    t = text
+    for _ in range(200):
+        i = max(t.rfind("}"), t.rfind("]"), t.rfind(","))
+        if i <= 0:
+            break
+        t = t[:i] if t[i] == "," else t[:i + 1]
+        try:
+            return json.loads(_repair_json(t))
+        except json.JSONDecodeError:
+            t = t[:i]
+    raise ValueError("model output could not be parsed as JSON")
 
 
 def call_llm(messages: list[dict]) -> str:
@@ -97,7 +147,7 @@ def call_llm(messages: list[dict]) -> str:
         "model": LLM_MODEL,
         "messages": messages,
         "temperature": 0.2,
-        "max_tokens": 12000,
+        "max_tokens": 16000,
         "chat_template_kwargs": {"reasoning_effort": "low"},
     }
     with httpx.Client(timeout=LLM_TIMEOUT) as client:
@@ -182,13 +232,15 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
         {"role": "user", "content": user},
     ])
     with db() as con:
-        set_state(con, "last_raw", {"at": int(time.time()), "text": text[-6000:]})
+        set_state(con, "last_raw", {"at": int(time.time()), "text": text[:60000]})
     try:
         result = _parse_json(text)
     except Exception:  # noqa: BLE001
-        log.error("bad JSON from model: %.500s", text)
+        log.error("bad JSON from model (%d chars): %.300s", len(text), text)
         with db() as con:
             set_state(con, "last_error", {"at": int(time.time()), "text": text[:2000]})
+            # park these articles (processed=3) so the batch is not retried forever
+            con.executemany("UPDATE articles SET processed=3 WHERE id=?", [(r["id"],) for r in rows])
         return 0
     conflicts = [c for c in result.get("conflicts", []) if _valid(c)]
     by_id = {c["id"]: c for c in existing}
