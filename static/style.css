@@ -16,6 +16,12 @@
   --st-ceasefire: #0ca30c;
   --st-frozen: #898781;
   --heat: #f2a33a;
+  --w-missile: #ffffff;
+  --w-drone: #eda100;
+  --w-airstrike: #e87ba4;
+  --w-artillery: #c3c2b7;
+  --w-naval: #1baf7a;
+  --w-other: #9085e9;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -99,6 +105,24 @@ button:disabled { opacity: .5; cursor: default; }
 .sev { display: inline-block; border-radius: 50%; background: var(--st-active); }
 .sev.s5 { width: 16px; height: 16px; } .sev.s3 { width: 11px; height: 11px; } .sev.s1 { width: 7px; height: 7px; }
 .sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.sw.w-missile { background: var(--w-missile);} .sw.w-drone { background: var(--w-drone);} .sw.w-airstrike { background: var(--w-airstrike);} .sw.w-artillery { background: var(--w-artillery);} .sw.w-naval { background: var(--w-naval);}
+#legend .muted { color: var(--muted); }
+.toggle.slider input[type=range] { width: 90px; accent-color: var(--st-active); }
+.toggle.slider span { min-width: 78px; }
+.strike { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; line-height: 1.4; cursor: pointer; }
+.strike:hover { background: var(--surface-2); }
+.strike .date { flex: none; color: var(--muted); width: 44px; font-variant-numeric: tabular-nums; }
+.strike .w { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
+.strike .body { flex: 1; }
+.strike .route { font-weight: 500; }
+.strike .meta { color: var(--muted); }
+.strike .prec { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin-left: 4px; }
+.card .strikes { color: var(--muted); font-size: 11px; margin-left: auto; }
+.maplibregl-popup-content { background: var(--surface); color: var(--ink-2); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; padding: 10px 12px; max-width: 280px; }
+.maplibregl-popup-content b { color: var(--ink); }
+.maplibregl-popup-content a { color: var(--ink-2); }
+.maplibregl-popup-tip { border-top-color: var(--surface) !important; border-bottom-color: var(--surface) !important; }
+.maplibregl-popup-close-button { color: var(--muted); font-size: 16px; }
 .sw.st-escalating { background: var(--st-escalating);} .sw.st-active { background: var(--st-active);} .sw.st-de-escalating { background: var(--st-de-escalating);} .sw.st-ceasefire { background: var(--st-ceasefire);}
 .ramp { width: 60px; height: 8px; border-radius: 2px; background: linear-gradient(90deg, var(--land), var(--heat)); }
 .line { width: 22px; height: 2px; display: inline-block; }

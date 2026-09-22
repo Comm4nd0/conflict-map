@@ -35,6 +35,17 @@ CREATE TABLE IF NOT EXISTS conflicts (
     data TEXT NOT NULL,     -- JSON blob
     created INTEGER, updated INTEGER
 );
+CREATE TABLE IF NOT EXISTS strikes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conflict_id TEXT, date TEXT, weapon TEXT,
+    origin_name TEXT, origin_lat REAL, origin_lon REAL, origin_country TEXT, origin_precision TEXT,
+    target_name TEXT, target_lat REAL, target_lon REAL, target_country TEXT, target_precision TEXT,
+    launched INTEGER, intercepted INTEGER, outcome TEXT,
+    link TEXT, title TEXT, source TEXT,
+    created INTEGER,
+    UNIQUE(conflict_id, date, weapon, target_name)
+);
+CREATE INDEX IF NOT EXISTS idx_strikes_date ON strikes(date);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
 """
 

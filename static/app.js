@@ -4,6 +4,7 @@ const STATUS_COLOR = {
   ceasefire: "#0ca30c", frozen: "#898781",
 };
 const SIDE_COLOR = { A: "#3987e5", B: "#d95926", other: "#9085e9" };
+const WEAPON_COLOR = { missile: "#ffffff", drone: "#eda100", airstrike: "#e87ba4", artillery: "#c3c2b7", naval: "#1baf7a", other: "#9085e9" };
 const LAND = "#3a3a42", HEAT = "#f2a33a";
 
 let COUNTRIES = {};          // iso3 -> {iso3, iso2, name, lat, lon}
@@ -115,6 +116,51 @@ map.on("load", async () => {
     },
   });
 
+  // ---- strikes: paths, impacts, animated projectiles, impact flashes
+  for (const id of ["strike-paths", "strike-impacts", "projectiles", "flashes"])
+    map.addSource(id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "strike-paths", type: "line", source: "strike-paths",
+    paint: { "line-color": ["get", "color"], "line-width": 1, "line-opacity": ["case", ["get", "dim"], 0.08, 0.3] },
+  });
+  map.addLayer({
+    id: "flashes", type: "circle", source: "flashes",
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, ["*", 10, ["get", "r"]], 6, ["*", 40, ["get", "r"]]],
+      "circle-color": ["get", "color"], "circle-opacity": ["*", 0.35, ["get", "a"]],
+      "circle-stroke-color": ["get", "color"], "circle-stroke-width": 1.5, "circle-stroke-opacity": ["get", "a"],
+      "circle-blur": 0.4,
+    },
+  });
+  map.addLayer({
+    id: "strike-impacts", type: "circle", source: "strike-impacts",
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, ["get", "r"], 6, ["*", 2.2, ["get", "r"]]],
+      "circle-color": ["get", "color"],
+      "circle-opacity": ["case", ["get", "dim"], 0.15, ["case", ["==", ["get", "precision"], "country"], 0.08, 0.55]],
+      "circle-stroke-color": ["get", "color"], "circle-stroke-width": 1.2,
+      "circle-stroke-opacity": ["case", ["get", "dim"], 0.15, 0.9],
+    },
+  });
+  map.addLayer({
+    id: "projectiles", type: "circle", source: "projectiles",
+    paint: { "circle-radius": 3, "circle-color": ["get", "color"], "circle-blur": 0.2,
+             "circle-stroke-color": "rgba(0,0,0,0.6)", "circle-stroke-width": 1 },
+  });
+  map.on("mousemove", "strike-impacts", (e) => {
+    const p = e.features[0].properties; const tip = $("#tooltip");
+    tip.innerHTML = strikeHtml(p);
+    tip.hidden = false; tip.style.left = (e.point.x + 14) + "px"; tip.style.top = (e.point.y + 14) + "px";
+    map.getCanvas().style.cursor = "pointer";
+  });
+  map.on("mouseleave", "strike-impacts", () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
+  map.on("click", "strike-impacts", (e) => {
+    e.originalEvent.stopPropagation();
+    const p = e.features[0].properties;
+    new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(e.lngLat)
+      .setHTML(strikeHtml(p) + (p.link ? `<br><a href="${esc(p.link)}" target="_blank">${esc(p.title || "source")} ↗</a>` : "")).addTo(map);
+  });
+
   // hover tooltip on countries
   const tip = $("#tooltip");
   map.on("mousemove", "country-fill", (e) => {
@@ -150,6 +196,7 @@ function render() {
   renderMarkers();
   renderArcs();
   renderGdeltArcs();
+  renderStrikes();
   if (selected && STATE.conflicts.find(c => c.id === selected)) renderDetail(); else { selected = null; renderList(); }
   applyInvolvement();
 }
@@ -254,7 +301,7 @@ function renderList() {
     const others = c.parties.filter(p => p.role !== "combatant" && norm(p.country)).map(p => flag(norm(p.country)));
     return `<div class="card ${c.id === selected ? "selected" : ""}" data-id="${esc(c.id)}">
       <div class="head"><span class="name">${esc(c.name)}</span>${sevbar(c.severity)}<span class="badge st-${esc(c.status)}">${esc(c.status)}</span></div>
-      <div class="region">${esc(c.region || "")} · updated ${ago(c.updated)}</div>
+      <div class="region">${esc(c.region || "")} · updated ${ago(c.updated)}${nStrikes(c.id) ? ` · ${nStrikes(c.id)} strikes / 7d` : ""}</div>
       <div class="flags">${[...new Set(combat)].join(" ")}<span style="opacity:.5"> ${[...new Set(others)].join(" ")}</span></div>
     </div>`;
   }).join("");
@@ -283,21 +330,117 @@ function renderDetail() {
     <div class="cons">${(c.consequences || []).map(x => `<div class="con"><span class="cat">${esc(x.category)}</span><span>${esc(x.text)}${(x.affects || []).length ? ` <span style="opacity:.6">${x.affects.map(a => flag(norm(a))).join(" ")}</span>` : ""}</span></div>`).join("") || "<div class='empty'>none recorded</div>"}</div>
     <h3>Latest developments</h3>
     ${(c.developments || []).map(x => `<div class="dev"><span class="date">${esc(x.date)}</span><span>${esc(x.text)}${(x.sources || []).map(u => ` <a href="${esc(u)}" target="_blank" title="${esc(u)}">↗</a>`).join("")}</span></div>`).join("")}
+    <h3>Reported strikes (7 days)</h3>
+    ${conflictStrikes(c.id).map(st => `<div class="strike" data-id="${st.id}">
+      <span class="date">${esc(st.date.slice(5).replace("-", "/"))}</span><span class="w" style="background:${WEAPON_COLOR[st.weapon] || WEAPON_COLOR.other}"></span>
+      <span class="body"><span class="route">${st.origin_name ? esc(st.origin_name) + " → " : ""}${esc(st.target_name)}</span><span class="prec">${esc(st.target_precision)}</span><br>
+      <span class="meta">${esc(st.weapon)}${st.launched != null ? ` · ${st.launched} launched` : ""}${st.intercepted != null ? ` · ${st.intercepted} intercepted` : ""}${st.outcome ? ` · ${esc(st.outcome)}` : ""}</span></span>
+    </div>`).join("") || "<div class='empty'>none reported in the feeds</div>"}
     <h3>Sources</h3>
     ${(c.sources || []).slice(0, 12).map(s => `<div class="src"><a href="${esc(s.link)}" target="_blank">${esc(s.title)}</a> <span class="s">— ${esc(s.source)}</span></div>`).join("")}
   `;
   d.querySelector(".back").addEventListener("click", () => select(null));
+  d.querySelectorAll(".strike").forEach(el => el.addEventListener("click", () => {
+    const st = STATE.strikes.find(x => x.id === +el.dataset.id);
+    if (st) map.flyTo({ center: [st.target_lon, st.target_lat], zoom: Math.max(map.getZoom(), 5.5), speed: 0.9 });
+  }));
 }
 
 function select(id) {
   selected = id;
   const c = STATE.conflicts.find(x => x.id === id);
   if (c && c.epicenter) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
-  renderMarkers(); renderArcs(); applyInvolvement();
+  renderMarkers(); renderArcs(); applyInvolvement(); renderStrikes();
   if (c) renderDetail(); else renderList();
 }
 
+/* ---------- strikes ---------- */
+let strikeAnim = null;      // {items:[{path, color, id, hasPath}], start}
+const dayFilter = () => +$("#day").value;   // 0 = all, 1 = today, 2 = yesterday …
+const dayString = (offset) => new Date(Date.now() - (offset - 1) * 86400000).toISOString().slice(0, 10);
+function visibleStrikes() {
+  let list = STATE.strikes || [];
+  const d = dayFilter();
+  if (d) list = list.filter(s => s.date === dayString(d));
+  return list;
+}
+const nStrikes = (cid) => (STATE.strikes || []).filter(s => s.conflict_id === cid).length;
+const conflictStrikes = (cid) => (STATE.strikes || []).filter(s => s.conflict_id === cid);
+
+/* bent arc: great-circle path bulged sideways so it reads as a trajectory */
+function trajectory(from, to) {
+  const pts = arc(from, to, 48);
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len, ny = dx / len;                 // perpendicular
+  const bulge = Math.min(6, len * 0.18);
+  return pts.map((p, i) => { const f = i / (pts.length - 1); const b = Math.sin(Math.PI * f) * bulge; return [p[0] + nx * b, p[1] + ny * b]; });
+}
+
+function strikeHtml(p) {
+  return `<b>${esc(p.origin_name ? p.origin_name + " → " : "")}${esc(p.target_name)}</b> <span style="opacity:.6">${esc(p.target_precision)}</span><br>` +
+    `${esc(p.date)} · ${esc(p.weapon)}${p.launched != null && p.launched !== "" ? ` · ${p.launched} launched` : ""}${p.intercepted != null && p.intercepted !== "" ? ` · ${p.intercepted} intercepted` : ""}` +
+    (p.outcome ? `<br>${esc(p.outcome)}` : "") + (p.source ? `<br><span style="opacity:.6">${esc(p.source)}</span>` : "");
+}
+
+function renderStrikes() {
+  const list = visibleStrikes();
+  const paths = [], impacts = [], items = [];
+  list.forEach((st, i) => {
+    const color = WEAPON_COLOR[st.weapon] || WEAPON_COLOR.other;
+    const dim = !!(selected && selected !== st.conflict_id);
+    const to = [st.target_lon, st.target_lat];
+    const r = 3 + Math.min(6, Math.log2(1 + (st.launched || 1)));
+    impacts.push({ type: "Feature", geometry: { type: "Point", coordinates: to },
+      properties: { ...st, color, dim, r: st.target_precision === "country" ? 14 : r, precision: st.target_precision } });
+    let path = null;
+    if (st.origin_lat != null && st.origin_precision !== "country" || (st.origin_lat != null && st.target_precision !== "country")) {
+      path = trajectory([st.origin_lon, st.origin_lat], to);
+      paths.push({ type: "Feature", geometry: { type: "LineString", coordinates: path }, properties: { color, dim } });
+    }
+    items.push({ id: st.id, path, to, color, dim, phase: (i * 0.73) % 1 });
+  });
+  map.getSource("strike-paths").setData({ type: "FeatureCollection", features: paths });
+  map.getSource("strike-impacts").setData({ type: "FeatureCollection", features: impacts });
+  strikeAnim = { items };
+  if (!strikeAnim.raf) tickStrikes();
+}
+
+const PERIOD = 7000; // ms per replay cycle
+function tickStrikes() {
+  if (!strikeAnim) return;
+  if ($("#tg-strikes").checked && !document.hidden) {
+    const now = performance.now();
+    const proj = [], flashes = [];
+    for (const it of strikeAnim.items) {
+      if (it.dim) continue;
+      const t = ((now / PERIOD) + it.phase) % 1;      // 0..1 within cycle
+      if (it.path && t < 0.55) {
+        const f = t / 0.55, k = f * (it.path.length - 1), i0 = Math.floor(k), i1 = Math.min(it.path.length - 1, i0 + 1), fr = k - i0;
+        const p0 = it.path[i0], p1 = it.path[i1];
+        proj.push({ type: "Feature", geometry: { type: "Point", coordinates: [p0[0] + (p1[0] - p0[0]) * fr, p0[1] + (p1[1] - p0[1]) * fr] }, properties: { color: it.color } });
+      } else if (t >= 0.55 && t < 0.85) {
+        const f = (t - 0.55) / 0.3;
+        flashes.push({ type: "Feature", geometry: { type: "Point", coordinates: it.to }, properties: { color: it.color, r: 0.2 + f, a: 1 - f } });
+      }
+    }
+    map.getSource("projectiles").setData({ type: "FeatureCollection", features: proj });
+    map.getSource("flashes").setData({ type: "FeatureCollection", features: flashes });
+  }
+  strikeAnim.raf = requestAnimationFrame(tickStrikes);
+}
+
+function setStrikeVisibility(on) {
+  for (const id of ["strike-paths", "strike-impacts", "projectiles", "flashes"]) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+}
+
 /* ---------- controls ---------- */
+$("#tg-strikes").addEventListener("change", e => setStrikeVisibility(e.target.checked));
+$("#day").addEventListener("input", () => {
+  const d = dayFilter();
+  $("#day-label").textContent = d === 0 ? "all 7 days" : d === 1 ? "today" : d === 2 ? "yesterday" : dayString(d).slice(5);
+  if (STATE) renderStrikes();
+});
 $("#tg-heat").addEventListener("change", e => {
   map.setLayoutProperty("heat", "visibility", e.target.checked ? "visible" : "none");
   if (!e.target.checked) for (const iso of Object.keys(COUNTRIES)) map.setFeatureState({ source: "countries", id: iso }, { heat: 0 });

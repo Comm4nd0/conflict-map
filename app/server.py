@@ -2,6 +2,7 @@ import asyncio
 import logging
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
@@ -39,9 +40,12 @@ async def _start():
 
 
 @app.get("/api/state")
-def state(hours: int = GDELT_WINDOW_HOURS):
+def state(hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
+    since = (datetime.now(timezone.utc) - timedelta(days=strike_days)).strftime("%Y-%m-%d")
     with db() as con:
         conflicts = all_conflicts(con)
+        strikes = [dict(r) for r in con.execute(
+            "SELECT * FROM strikes WHERE date >= ? ORDER BY date DESC, id DESC LIMIT 600", (since,))]
         meta = {
             "last_refresh": get_state(con, "last_refresh"),
             "last_extract": get_state(con, "last_extract"),
@@ -69,6 +73,7 @@ def state(hours: int = GDELT_WINDOW_HOURS):
     return JSONResponse({
         "meta": meta,
         "conflicts": conflicts,
+        "strikes": strikes,
         "gdelt": {"hours": agg["hours"], "total": agg["total"], "latest": agg["latest"],
                   "heat": heat, "points": agg["points"], "pairs": pairs},
     })

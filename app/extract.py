@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from . import geo
 from .config import ARTICLES_PER_BATCH, LLM_BASE, LLM_MODEL, LLM_TIMEOUT
 from .db import all_conflicts, db, set_state, upsert_conflict
 
@@ -44,6 +45,13 @@ Each conflict object:
   ],
   "developments": [
     {{"date": "YYYY-MM-DD", "text": "one sentence", "article_ids": [integer ids from this batch, always cite at least one]}}
+  ],
+  "strikes": [
+    {{"date": "YYYY-MM-DD", "weapon": "missile" | "drone" | "airstrike" | "artillery" | "naval" | "other",
+      "origin": {{"place": "launch area or null", "country": "ISO3 or null", "lat": float or null, "lon": float or null}},
+      "target": {{"place": "city / facility name", "country": "ISO3", "lat": float, "lon": float}},
+      "launched": integer or null, "intercepted": integer or null,
+      "outcome": "short phrase: what was hit / casualties", "article_ids": [integer ids]}}
   ]
 }}
 
@@ -51,6 +59,7 @@ Rules:
 - Parties: list the direct combatants first. A "supporter" must provide material support to one side (arms, money, troops, bases, intelligence). A country that merely comments, sanctions, hosts talks or denies a visa is NOT a supporter; use "mediator" only for active negotiation hosts. Include supporters when the news or well-established public knowledge supports it (e.g. USA/EU states arming Ukraine, Iran arming the Houthis). Use ISO 3166-1 alpha-3 codes (e.g. UKR, RUS, ISR, PSE, IRN, USA, GBR, SDN, YEM, COD). Non-state actors get "country": null but still belong to a side.
 - Keep records COMPLETE on every update: return the full merged party list, the full consequence list (keep prior items still true, add new ones, drop stale ones), and the 6 most recent developments (prior ones plus new ones).
 - Be factual and neutral. Cite the article ids that support each development. Never invent developments not in the batch.
+- Strikes: ONLY strikes reported in THIS batch of news items (never from memory). One entry per named target place per attack; if an article lists several cities hit, emit one entry per city. If the target is only given as a country or region, put that in "place" and set lat/lon to your best estimate. Origin is usually a region ("Crimea", "Iran", "Russia") - give its ISO3 and a rough lat/lon. Use exact numbers from the article for launched/intercepted, else null. Omit "strikes" entirely if the batch reports none for that conflict.
 - Dates: use the article's date. Today is {{today}}.
 - Output valid JSON only, no markdown fences, no commentary."""
 
@@ -105,6 +114,50 @@ def _valid(c: dict) -> bool:
     return bool(c.get("id")) and bool(c.get("name")) and isinstance(c.get("parties"), list)
 
 
+WEAPONS = {"missile", "drone", "airstrike", "artillery", "naval", "other"}
+
+
+def _store_strikes(con, conflict_id: str, strikes: list, art: dict) -> int:
+    n = 0
+    for st in strikes:
+        if not isinstance(st, dict):
+            continue
+        tgt = st.get("target") or {}
+        target = geo.resolve(tgt.get("place"), tgt.get("country"), tgt.get("lat"), tgt.get("lon"))
+        if not target:
+            continue
+        org = st.get("origin") or {}
+        origin = geo.resolve(org.get("place"), org.get("country"), org.get("lat"), org.get("lon")) if org else None
+        weapon = st.get("weapon") if st.get("weapon") in WEAPONS else "other"
+        src = None
+        for aid in st.get("article_ids") or []:
+            if aid in art:
+                src = art[aid]
+                break
+        date = str(st.get("date") or "")[:10]
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            continue
+
+        def _int(v):
+            try:
+                return int(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        cur = con.execute(
+            "INSERT OR IGNORE INTO strikes(conflict_id,date,weapon,origin_name,origin_lat,origin_lon,origin_country,"
+            "origin_precision,target_name,target_lat,target_lon,target_country,target_precision,launched,intercepted,"
+            "outcome,link,title,source,created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (conflict_id, date, weapon,
+             origin and origin["name"], origin and origin["lat"], origin and origin["lon"],
+             origin and origin["country"], origin and origin["precision"],
+             target["name"], target["lat"], target["lon"], target["country"], target["precision"],
+             _int(st.get("launched")), _int(st.get("intercepted")), (st.get("outcome") or "")[:300],
+             src and src["link"], src and src["title"], src and src["source"], int(time.time())))
+        n += cur.rowcount
+    return n
+
+
 def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
     with db() as con:
         rows = con.execute(
@@ -138,6 +191,7 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
     conflicts = [c for c in result.get("conflicts", []) if _valid(c)]
     by_id = {c["id"]: c for c in existing}
     art = {r["id"]: dict(r) for r in rows}
+    n_strikes = 0
     with db() as con:
         for c in conflicts:
             prev = by_id.get(c["id"], {})
@@ -155,11 +209,14 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
                 c.get("developments", []), key=lambda d: d.get("date", ""), reverse=True)[:8]
             c["last_seen"] = int(time.time())
             c["first_seen"] = prev.get("first_seen", int(time.time()))
+            strikes = c.pop("strikes", None) or []
             upsert_conflict(con, c["id"], c)
+            n_strikes += _store_strikes(con, c["id"], strikes, art)
         con.executemany("UPDATE articles SET processed=1 WHERE id=?", [(r["id"],) for r in rows])
         set_state(con, "last_extract", {"at": int(time.time()), "articles": len(rows),
-                                        "conflicts": len(conflicts), "secs": round(time.time() - t0)})
-    log.info("updated %d conflicts in %.0fs", len(conflicts), time.time() - t0)
+                                        "conflicts": len(conflicts), "strikes": n_strikes,
+                                        "secs": round(time.time() - t0)})
+    log.info("updated %d conflicts, %d new strikes in %.0fs", len(conflicts), n_strikes, time.time() - t0)
     return len(conflicts)
 
 

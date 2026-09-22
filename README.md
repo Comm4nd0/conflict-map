@@ -18,6 +18,15 @@ who is backing whom, and what the consequences are.
    Conflict markers sized by severity and coloured by status; dashed arcs from
    supporters/mediators to the epicenter; click a conflict to highlight its parties.
 
+5. **Strikes** – the model also lists strikes reported in each batch (weapon, origin,
+   target, launched/intercepted counts, outcome, source). Place names are resolved
+   through a local gazetteer (`static/data/places.geojson`, Natural Earth 10m
+   populated places, ~7,300 cities); the model's own coordinates are only accepted
+   when they fall inside the named country, otherwise the strike snaps to the country
+   centroid with precision `country`. Precision is `city`, `approx` or `country` and is
+   shown in the UI. On the map each strike replays as an animated projectile along a
+   bent trajectory with an impact flash; a day slider filters to one day.
+
 Everything lives in `data/conflict.db` (SQLite). Nothing leaves the machine except
 the fetches to GDELT and the RSS feeds.
 
