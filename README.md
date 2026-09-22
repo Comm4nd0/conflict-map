@@ -8,8 +8,15 @@ who is backing whom, and what the consequences are.
 1. **GDELT** – every 15 minutes GDELT publishes a global event file. We keep the
    "material conflict" events (CAMEO quad class 4) for the last 48 h and use them as
    a background heat layer (per-country fill + heatmap) and for actor-pair links.
-2. **RSS feeds** – BBC, Al Jazeera, Guardian, NYT, DW, France 24, UN News,
-   Kyiv Independent, Times of Israel (see `app/config.py`).
+2. **RSS feeds** – ~50 feeds (see `app/config.py`): BBC/Guardian/France 24 regional
+   desks, NYT, WaPo, CNN, NPR, CBC, Sky, DW, Euronews, Politico EU, VOA, UN News,
+   ReliefWeb, Google News keyword feeds (which surface Reuters and AP), regional
+   outlets (Kyiv Independent, Ukrainska Pravda, TASS, Times of Israel, JPost, Haaretz,
+   Middle East Eye, Al-Monitor, Anadolu, Africanews, AllAfrica, Dawn, The Hindu, SCMP,
+   Japan Times, Yonhap, The Diplomat) and defence/analysis sites (Defense One,
+   Breaking Defense, The War Zone, War on the Rocks, Long War Journal, Crisis Group,
+   Bellingcat). Feeds are fetched in parallel. Articles whose title and summary
+   contain none of the `RELEVANCE_TERMS` are stored but never sent to the model.
 3. **Local LLM extraction** – unprocessed articles go to `gpt-oss-120b` on llama-swap
    (`http://127.0.0.1:8080/v1`) in batches of 40, together with the existing conflict
    records. The model returns updated/new conflict records: parties (side + role),

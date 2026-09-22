@@ -218,6 +218,7 @@ function renderStatus() {
   const m = STATE.meta, g = STATE.gdelt;
   const parts = [];
   parts.push(`${STATE.conflicts.length} conflicts`);
+  parts.push(`${m.sources} sources`);
   parts.push(`${g.total.toLocaleString()} GDELT events / ${g.hours}h`);
   parts.push(`extract ${ago(m.last_extract?.at)}`);
   if (m.busy) parts.push(`⟳ refreshing (${m.unprocessed} articles queued)`);

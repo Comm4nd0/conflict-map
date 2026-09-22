@@ -51,6 +51,8 @@ def state(hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
             "last_extract": get_state(con, "last_extract"),
             "unprocessed": con.execute("SELECT COUNT(*) FROM articles WHERE processed=0").fetchone()[0],
             "articles": con.execute("SELECT COUNT(*) FROM articles").fetchone()[0],
+            "skipped": con.execute("SELECT COUNT(*) FROM articles WHERE processed=2").fetchone()[0],
+            "sources": con.execute("SELECT COUNT(DISTINCT source) FROM articles WHERE published > strftime('%s','now') - 7*86400").fetchone()[0],
             "busy": _lock.locked(),
             "now": int(time.time()),
         }

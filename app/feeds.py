@@ -1,5 +1,6 @@
 """Fetch RSS feeds into the articles table."""
 import calendar
+import concurrent.futures as cf
 import logging
 import re
 import time
@@ -8,7 +9,7 @@ from html import unescape
 import feedparser
 import httpx
 
-from .config import FEEDS
+from .config import FEEDS, RELEVANCE_TERMS
 from .db import db
 
 log = logging.getLogger("feeds")
@@ -21,33 +22,45 @@ def _clean(s: str, limit: int = 600) -> str:
     return s[:limit]
 
 
+RELEVANT = re.compile("|".join(re.escape(t) for t in RELEVANCE_TERMS), re.I)
+
+
+def _fetch(name_url):
+    name, url = name_url
+    try:
+        resp = httpx.get(url, timeout=30, follow_redirects=True,
+                         headers={"User-Agent": "Mozilla/5.0 conflict-map/0.1 (local)"})
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        log.warning("%s: %s", name, e)
+        return name, []
+    parsed = feedparser.parse(resp.content)
+    rows = []
+    for e in parsed.entries:
+        link = e.get("link")
+        if not link:
+            continue
+        pub = e.get("published_parsed") or e.get("updated_parsed")
+        ts = calendar.timegm(pub) if pub else int(time.time())
+        title = _clean(e.get("title", ""), 300)
+        summary = _clean(e.get("summary", ""))
+        relevant = bool(RELEVANT.search(title + " " + summary))
+        rows.append((link, name, title, summary, ts, int(time.time()), 0 if relevant else 2))
+    return name, rows
+
+
 def update() -> int:
     new = 0
-    with httpx.Client(timeout=30, follow_redirects=True,
-                      headers={"User-Agent": "conflict-map/0.1 (local)"}) as client:
-        for name, url in FEEDS.items():
-            try:
-                resp = client.get(url)
-                resp.raise_for_status()
-            except httpx.HTTPError as e:
-                log.warning("%s: %s", name, e)
+    with cf.ThreadPoolExecutor(8) as ex:
+        for name, rows in ex.map(_fetch, FEEDS.items()):
+            if not rows:
                 continue
-            parsed = feedparser.parse(resp.content)
-            rows = []
-            for e in parsed.entries:
-                link = e.get("link")
-                if not link:
-                    continue
-                pub = e.get("published_parsed") or e.get("updated_parsed")
-                ts = calendar.timegm(pub) if pub else int(time.time())
-                rows.append((link, name, _clean(e.get("title", ""), 300),
-                             _clean(e.get("summary", "")), ts, int(time.time())))
             with db() as con:
                 before = con.total_changes
                 con.executemany(
-                    "INSERT OR IGNORE INTO articles(link,source,title,summary,published,fetched) "
-                    "VALUES (?,?,?,?,?,?)", rows)
+                    "INSERT OR IGNORE INTO articles(link,source,title,summary,published,fetched,processed) "
+                    "VALUES (?,?,?,?,?,?,?)", rows)
                 added = con.total_changes - before
             new += added
-            log.info("%s: %d entries, %d new", name, len(rows), added)
+            log.info("%s: %d entries, %d new, %d relevant", name, len(rows), added, sum(1 for r in rows if r[6] == 0))
     return new

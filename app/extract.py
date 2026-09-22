@@ -222,7 +222,7 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
     return len(conflicts)
 
 
-def run_all(max_batches: int = 20) -> int:
+def run_all(max_batches: int = 60) -> int:
     total = 0
     for _ in range(max_batches):
         n = run_batch()
