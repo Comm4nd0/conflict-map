@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import countries, gdelt, pipeline
+from . import countries, gdelt, pipeline, reader
 from .config import GDELT_WINDOW_HOURS, REFRESH_MINUTES, SERVE_ONLY, STATIC_DIR
 from .db import all_conflicts, db, get_state
 
@@ -105,6 +105,13 @@ def state(hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
         "gdelt": {"hours": agg["hours"], "total": agg["total"], "latest": agg["latest"],
                   "heat": heat, "points": agg["points"], "pairs": pairs, "incidents": incidents},
     })
+
+
+@app.get("/api/article")
+async def article(url: str):
+    if len(url) > 2000:
+        return JSONResponse({"ok": False, "error": "bad url"}, status_code=400)
+    return await asyncio.to_thread(reader.fetch, url)
 
 
 @app.get("/api/countries")

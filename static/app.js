@@ -256,8 +256,8 @@ map.on("load", async () => {
   map.on("click", "strike-impacts", (e) => {
     e.originalEvent._handled = true;
     const p = e.features[0].properties;
-    new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(e.lngLat)
-      .setHTML(strikeHtml(p) + (p.link ? `<br><a href="${esc(p.link)}" target="_blank">${esc(p.title || "source")} ↗</a>` : "")).addTo(map);
+    if (p.link) openArticle(p.link, { title: p.title, source: p.source, context: strikeHtml(p) });
+    else new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(e.lngLat).setHTML(strikeHtml(p)).addTo(map);
   });
 
   // ---- GDELT located incidents (fight / mass-violence events with a place and a source)
@@ -284,9 +284,7 @@ map.on("load", async () => {
     const p = e.features[0].properties;
     let urls = [];
     try { urls = JSON.parse(p.urls || "[]"); } catch (_) { urls = p.url ? [p.url] : []; }
-    const links = urls.map(u => `<div><a href="${esc(u)}" target="_blank">${esc(u.replace(/^https?:\/\/(www\.)?/, "").slice(0, 70))} ↗</a></div>`).join("");
-    new maplibregl.Popup({ closeButton: true, maxWidth: "340px" }).setLngLat(e.lngLat)
-      .setHTML(incidentHtml(p) + `<div style="margin-top:6px">${links}</div><div style="opacity:.55;margin-top:4px">Articles GDELT tagged with this place. Placement is automatic and can be wrong.</div>`).addTo(map);
+    if (urls.length) openArticle(urls[0], { alternatives: urls, context: incidentHtml(p) + `<div style="opacity:.55;margin-top:4px">Articles GDELT tagged with this place. Placement is automatic and can be wrong.</div>` });
   });
 
   // hover outline
@@ -360,7 +358,8 @@ function render() {
   renderGdeltArcs();
   renderStrikes();
   renderIncidents();
-  if (selected && STATE.conflicts.find(c => c.id === selected)) renderDetail(); else { selected = null; renderList(); }
+  if (readerOpen) { /* leave the article on screen; the list/detail refresh underneath when it closes */ }
+  else if (selected && STATE.conflicts.find(c => c.id === selected)) renderDetail(); else { selected = null; renderList(); }
   applyInvolvement();
 }
 
@@ -495,6 +494,7 @@ function sevbar(n) { return `<span class="sevbar">${[1, 2, 3, 4, 5].map(i => `<i
 
 function reveal(el) { el.classList.remove("reveal"); void el.offsetWidth; el.classList.add("reveal"); }
 function renderList() {
+  $("#reader").hidden = true; readerOpen = false;
   $("#detail").hidden = true; $("#list").hidden = false; reveal($("#list"));
   if (!STATE.conflicts.length) {
     $("#list").innerHTML = `<div class="empty">No conflicts extracted yet.<br><br>${STATE.meta.busy ? "The first refresh is running — the local model is reading the news feeds now." : "Press Refresh to fetch the feeds and run extraction."}</div>`;
@@ -514,6 +514,7 @@ function renderList() {
 
 function renderDetail() {
   const c = STATE.conflicts.find(x => x.id === selected); if (!c) return renderList();
+  $("#reader").hidden = true; readerOpen = false;
   $("#list").hidden = true; const d = $("#detail"); d.hidden = false; reveal(d);
   const bySide = { A: [], B: [], other: [] };
   for (const p of c.parties) (bySide[p.side] || bySide.other).push(p);
@@ -533,7 +534,7 @@ function renderDetail() {
     <h3>Consequences</h3>
     <div class="cons">${(c.consequences || []).map(x => `<div class="con"><span class="cat">${esc(x.category)}</span><span>${esc(x.text)}${(x.affects || []).length ? ` <span style="opacity:.6">${x.affects.map(a => flag(norm(a))).join(" ")}</span>` : ""}</span></div>`).join("") || "<div class='empty'>none recorded</div>"}</div>
     <h3>Latest developments</h3>
-    ${(c.developments || []).map(x => `<div class="dev"><span class="date">${esc(x.date)}</span><span>${esc(x.text)}${(x.sources || []).map(u => ` <a href="${esc(u)}" target="_blank" title="${esc(u)}">↗</a>`).join("")}</span></div>`).join("")}
+    ${(c.developments || []).map(x => `<div class="dev" data-url="${esc((x.sources || [])[0] || "")}"><span class="date">${esc(x.date)}</span><span>${esc(x.text)}${(x.sources || []).map(u => ` <a href="${esc(u)}" target="_blank" title="open original">↗</a>`).join("")}</span></div>`).join("")}
     <h3>Reported attacks (7 days)</h3>
     ${conflictStrikes(c.id).map(st => `<div class="strike" data-id="${st.id}">
       <span class="date">${esc(st.date.slice(5).replace("-", "/"))}</span><span class="w" style="background:${WEAPON_COLOR[st.weapon] || WEAPON_COLOR.other}"></span>
@@ -541,9 +542,17 @@ function renderDetail() {
       <span class="meta">${esc(st.weapon)}${st.launched != null ? ` · ${st.launched} launched` : ""}${st.intercepted != null ? ` · ${st.intercepted} intercepted` : ""}${st.outcome ? ` · ${esc(st.outcome)}` : ""}</span></span>
     </div>`).join("") || "<div class='empty'>none reported in the feeds</div>"}
     <h3>Sources</h3>
-    ${(c.sources || []).slice(0, 12).map(s => `<div class="src"><a href="${esc(s.link)}" target="_blank">${esc(s.title)}</a> <span class="s">— ${esc(s.source)}</span></div>`).join("")}
+    ${(c.sources || []).slice(0, 12).map(s => `<div class="src" data-url="${esc(s.link)}" data-title="${esc(s.title)}" data-source="${esc(s.source)}">${esc(s.title)} <span class="s">— ${esc(s.source)}</span> <a href="${esc(s.link)}" target="_blank" title="open original">↗</a></div>`).join("")}
   `;
   d.querySelector(".back").addEventListener("click", () => select(null));
+  d.querySelectorAll(".src").forEach(el => el.addEventListener("click", (ev) => {
+    if (ev.target.tagName === "A") return;
+    openArticle(el.dataset.url, { title: el.dataset.title, source: el.dataset.source });
+  }));
+  d.querySelectorAll(".dev").forEach(el => el.addEventListener("click", (ev) => {
+    if (ev.target.tagName === "A" || !el.dataset.url) return;
+    openArticle(el.dataset.url, {});
+  }));
   d.querySelectorAll(".strike").forEach(el => el.addEventListener("click", () => {
     const st = STATE.strikes.find(x => x.id === +el.dataset.id);
     if (st) map.flyTo({ center: [st.target_lon, st.target_lat], zoom: Math.max(map.getZoom(), 5.5), speed: 0.9 });
@@ -557,6 +566,45 @@ function select(id, opts = {}) {
   if (c && c.epicenter && !opts.keepView) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.55, curve: 1.3, essential: true });
   renderMarkers(); renderArcs(); applyInvolvement(); renderStrikes();
   if (c) renderDetail(); else renderList();
+}
+
+/* ---------- reader: show an article in the panel instead of leaving the site ---------- */
+let readerOpen = false, readerSeq = 0;
+const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (_) { return u; } };
+async function openArticle(url, opts = {}) {
+  const r = $("#reader"); const seq = ++readerSeq;
+  $("#list").hidden = true; $("#detail").hidden = true; r.hidden = false; readerOpen = true; reveal(r);
+  $("#panel").scrollTop = 0;
+  const alts = opts.alternatives && opts.alternatives.length > 1 ? opts.alternatives : null;
+  const altHtml = alts ? `<div class="alt">${alts.map(u => `<div class="${u === url ? "on" : ""}" data-url="${esc(u)}">${esc(host(u))}</div>`).join("")}</div>` : "";
+  r.innerHTML = `<span class="back">← back</span>
+    ${opts.context ? `<div class="meta" style="margin-bottom:8px">${opts.context}</div>` : ""}${altHtml}
+    <div class="site">${esc(opts.source || host(url))}</div>
+    <h2>${esc(opts.title || "")}</h2>
+    <div class="loading">Loading article</div>`;
+  r.querySelector(".back").addEventListener("click", closeReader);
+  r.querySelectorAll(".alt div").forEach(el => el.addEventListener("click", () => openArticle(el.dataset.url, opts)));
+  let a;
+  try { a = await (await fetch(`/api/article?url=${encodeURIComponent(url)}`)).json(); }
+  catch (_) { a = { ok: false, error: "could not reach the server" }; }
+  if (seq !== readerSeq) return;           // another article was opened meanwhile
+  const orig = `<a href="${esc(a.final_url || url)}" target="_blank">open original ↗</a>`;
+  if (!a.ok) {
+    r.querySelector(".loading").outerHTML = `<div class="err">Couldn't extract this article (${esc(a.error || "unknown error")}).<br>${orig}</div>`;
+    return;
+  }
+  r.querySelector(".site").textContent = a.site || host(a.final_url || url);
+  r.querySelector("h2").textContent = a.title || opts.title || "";
+  r.querySelector(".loading").outerHTML =
+    `<div class="meta">${[a.byline, a.date].filter(Boolean).map(esc).join(" · ")}${a.byline || a.date ? " · " : ""}${orig}</div>` +
+    (a.image ? `<img class="hero" src="${esc(a.image)}" alt="" loading="lazy" onerror="this.remove()">` : "") +
+    (a.note ? `<div class="err">${esc(a.note)}</div>` : "") +
+    a.paragraphs.map(t => `<p>${esc(t)}</p>`).join("") +
+    `<div class="meta" style="margin-top:14px">Reader view · ${orig}</div>`;
+}
+function closeReader() {
+  readerOpen = false; $("#reader").hidden = true;
+  if (selected && STATE.conflicts.find(c => c.id === selected)) renderDetail(); else renderList();
 }
 
 /* ---------- GDELT incidents ---------- */

@@ -2,3 +2,5 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 httpx>=0.27
 feedparser>=6.0
+trafilatura>=2.0
+googlenewsdecoder>=0.1

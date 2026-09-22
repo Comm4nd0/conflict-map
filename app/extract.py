@@ -162,6 +162,31 @@ def call_llm(messages: list[dict]) -> str:
     return msg.get("content") or ""
 
 
+STOP = {"the", "and", "vs", "of", "in", "government", "forces", "armed", "groups", "group", "conflict", "war", "rebels",
+        "militants", "coalition", "opposition", "border", "crisis", "military", "united", "states", "republic", "democratic",
+        "islamic", "state", "national", "army", "people", "front", "movement", "party", "linked"}
+
+
+def _conflict_terms(c: dict) -> set[str]:
+    """Distinctive words a cited article must mention: conflict name, party names, countries, region."""
+    words = []
+    for src in [c.get("name") or "", c.get("region") or ""] + [p.get("name") or "" for p in c.get("parties") or []]:
+        words += re.findall(r"[A-Za-z][A-Za-z\-]{3,}", src)
+    for p in c.get("parties") or []:
+        iso = geo.countries.iso3(p.get("country"))
+        if iso:
+            rec = geo.countries.table()["iso3"].get(iso) or {}
+            words += re.findall(r"[A-Za-z][A-Za-z\-]{3,}", (rec.get("name") or "") + " " + (rec.get("label") or ""))
+    terms = {w.lower() for w in words} - STOP
+    # allow adjective forms: sudan -> sudanese, israel -> israeli, russia -> russian, yemen -> yemeni
+    return terms | {t[:-1] for t in terms if len(t) > 5} | {t[:-2] for t in terms if len(t) > 6}
+
+
+def _cites_ok(c: dict, a: dict) -> bool:
+    text = ((a.get("title") or "") + " " + (a.get("summary") or "")).lower()
+    return any(t in text for t in _conflict_terms(c))
+
+
 def _valid(c: dict) -> bool:
     return bool(c.get("id")) and bool(c.get("name")) and isinstance(c.get("parties"), list)
 
@@ -169,8 +194,9 @@ def _valid(c: dict) -> bool:
 WEAPONS = {"missile", "drone", "airstrike", "artillery", "shelling", "ground", "bombing", "naval", "other"}
 
 
-def _store_strikes(con, conflict_id: str, strikes: list, art: dict) -> int:
+def _store_strikes(con, conflict_id: str, strikes: list, art: dict, conflict: dict | None = None) -> int:
     n = 0
+    conflict = conflict or {"name": conflict_id.replace("-", " ")}
     for st in strikes:
         if not isinstance(st, dict):
             continue
@@ -183,7 +209,7 @@ def _store_strikes(con, conflict_id: str, strikes: list, art: dict) -> int:
         weapon = st.get("weapon") if st.get("weapon") in WEAPONS else "other"
         src = None
         for aid in st.get("article_ids") or []:
-            if aid in art:
+            if aid in art and _cites_ok(conflict, art[aid]):
                 src = art[aid]
                 break
         date = str(st.get("date") or "")[:10]
@@ -292,6 +318,9 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
             for d in c.get("developments", []):
                 for aid in d.get("article_ids", []) or []:
                     a = art.get(aid)
+                    if a and not _cites_ok(c, a):
+                        log.info("dropping unrelated citation for %s: %s", c["id"], a["title"][:60])
+                        a = None
                     if a:
                         sources[a["link"]] = {"link": a["link"], "title": a["title"],
                                               "source": a["source"], "published": a["published"]}
@@ -309,7 +338,7 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
             c["first_seen"] = prev.get("first_seen", int(time.time()))
             strikes = c.pop("strikes", None) or []
             upsert_conflict(con, c["id"], c)
-            n_strikes += _store_strikes(con, c["id"], strikes, art)
+            n_strikes += _store_strikes(con, c["id"], strikes, art, c)
         con.executemany("UPDATE articles SET processed=1 WHERE id=?", [(r["id"],) for r in rows])
         set_state(con, "last_extract", {"at": int(time.time()), "articles": len(rows),
                                         "conflicts": len(conflicts), "strikes": n_strikes,
