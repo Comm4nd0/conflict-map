@@ -55,7 +55,7 @@ const map = new maplibregl.Map({
   style: {
     version: 8,
     sources: {},
-    layers: [{ id: "bg", type: "background", paint: { "background-color": "#121214" } }],
+    layers: [{ id: "bg", type: "background", paint: { "background-color": "#121214", "background-color-transition": { duration: 450 } } }],
   },
   center: [20, 25], zoom: 1.6, minZoom: 1, maxZoom: 8, attributionControl: false, preserveDrawingBuffer: true,
 });
@@ -101,6 +101,11 @@ map.on("load", async () => {
         0, "rgba(242,163,58,0)", 0.3, "rgba(242,163,58,0.25)", 0.7, "rgba(236,131,90,0.6)", 1, "rgba(208,59,59,0.85)"],
       "heatmap-opacity": 0.7,
     },
+  });
+  // focus mode: darkens everything not involved in the selected conflict
+  map.addLayer({
+    id: "country-dim", type: "fill", source: "countries",
+    paint: { "fill-color": "#08080a", "fill-opacity": 0, "fill-opacity-transition": { duration: 450 } },
   });
   map.addLayer({
     id: "garcs", type: "line", source: "garcs", layout: { visibility: "none" },
@@ -155,7 +160,7 @@ map.on("load", async () => {
   });
   map.on("mouseleave", "strike-impacts", () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
   map.on("click", "strike-impacts", (e) => {
-    e.originalEvent.stopPropagation();
+    e.originalEvent._handled = true;
     const p = e.features[0].properties;
     new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(e.lngLat)
       .setHTML(strikeHtml(p) + (p.link ? `<br><a href="${esc(p.link)}" target="_blank">${esc(p.title || "source")} ↗</a>` : "")).addTo(map);
@@ -173,6 +178,14 @@ map.on("load", async () => {
     tip.hidden = false; tip.style.left = (e.point.x + 14) + "px"; tip.style.top = (e.point.y + 14) + "px";
   });
   map.on("mouseleave", "country-fill", () => { tip.hidden = true; });
+  map.on("click", "country-fill", (e) => {
+    const iso = e.features[0].properties.ADM0_A3;
+    const list = conflictsFor(iso);
+    if (!list.length) return;                       // fall through to the map click (deselect)
+    e.originalEvent._handled = true;
+    const idx = list.findIndex(c => c.id === selected);
+    select(list[(idx + 1) % list.length].id);      // clicking again cycles through that country's conflicts
+  });
 
   await loadCountries();
   await load();
@@ -280,12 +293,24 @@ function renderGdeltArcs() {
 
 function applyInvolvement() {
   for (const iso of Object.keys(COUNTRIES)) map.setFeatureState({ source: "countries", id: iso }, { side: null, involved: false });
-  const c = STATE.conflicts.find(x => x.id === selected); if (!c) return;
-  for (const p of c.parties) {
+  const c = STATE.conflicts.find(x => x.id === selected);
+  if (c) for (const p of c.parties) {
     const iso = norm(p.country); if (!iso) continue;
     map.setFeatureState({ source: "countries", id: iso }, { side: p.side || "other", involved: true });
   }
+  setFocus(!!c);
 }
+
+function setFocus(on) {
+  map.setPaintProperty("country-dim", "fill-opacity",
+    on ? ["case", ["boolean", ["feature-state", "involved"], false], 0, 0.78] : 0);
+  map.setPaintProperty("bg", "background-color", on ? "#0a0a0c" : "#121214");
+  map.setPaintProperty("heat", "heatmap-opacity", on ? 0.25 : 0.7);
+  map.setPaintProperty("country-line", "line-color", on ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.12)");
+}
+
+/* which conflicts is a country a party to? */
+const conflictsFor = (iso) => STATE.conflicts.filter(c => c.parties.some(p => norm(p.country) === iso));
 
 /* ---------- panel ---------- */
 function sevbar(n) { return `<span class="sevbar">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= n ? "on" : ""}"></i>`).join("")}</span>`; }
@@ -454,4 +479,4 @@ $("#refresh").addEventListener("click", async () => {
   await fetch("/api/refresh", { method: "POST" });
   setTimeout(load, 1500);
 });
-map.on("click", () => { if (selected) select(null); });
+map.on("click", (e) => { if (e.originalEvent._handled) return; if (selected) select(null); });

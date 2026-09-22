@@ -94,7 +94,7 @@ button:disabled { opacity: .5; cursor: default; }
 /* markers */
 .mk { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.85); cursor: pointer; position: relative; }
 .mk::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor; opacity: .6; animation: ring 2.4s ease-out infinite; }
-.mk.dim { opacity: .35; }
+.mk.dim { opacity: .22; }
 .mk.dim::after { animation: none; display: none; }
 @keyframes ring { 0% { transform: scale(.6); opacity: .8; } 100% { transform: scale(2.2); opacity: 0; } }
 .mk-label { position: absolute; left: 14px; top: -2px; white-space: nowrap; font-size: 11px; color: var(--ink); text-shadow: 0 0 4px #000, 0 0 4px #000; pointer-events: none; }
