@@ -259,8 +259,11 @@ map.on("load", async () => {
   map.on("click", "incidents", (e) => {
     e.originalEvent._handled = true;
     const p = e.features[0].properties;
-    new maplibregl.Popup({ closeButton: true, maxWidth: "320px" }).setLngLat(e.lngLat)
-      .setHTML(incidentHtml(p) + (p.url ? `<br><a href="${esc(p.url)}" target="_blank">${esc(p.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60))} ↗</a>` : "")).addTo(map);
+    let urls = [];
+    try { urls = JSON.parse(p.urls || "[]"); } catch (_) { urls = p.url ? [p.url] : []; }
+    const links = urls.map(u => `<div><a href="${esc(u)}" target="_blank">${esc(u.replace(/^https?:\/\/(www\.)?/, "").slice(0, 70))} ↗</a></div>`).join("");
+    new maplibregl.Popup({ closeButton: true, maxWidth: "340px" }).setLngLat(e.lngLat)
+      .setHTML(incidentHtml(p) + `<div style="margin-top:6px">${links}</div><div style="opacity:.55;margin-top:4px">Articles GDELT tagged with this place. Placement is automatic and can be wrong.</div>`).addTo(map);
   });
 
   // hover outline
@@ -290,6 +293,7 @@ map.on("load", async () => {
   });
   map.on("mouseleave", "country-fill", () => { tip.hidden = true; });
   map.on("click", "country-fill", (e) => {
+    if (e.originalEvent._handled) return;          // an incident / attack circle on top took this click
     const iso = e.features[0].properties.ADM0_A3;
     const list = conflictsFor(iso);
     if (!list.length) return;                       // fall through to the map click (deselect)
@@ -538,7 +542,7 @@ function incidentHtml(p) {
 function renderIncidents() {
   const feats = (STATE.gdelt.incidents || []).map(i => ({
     type: "Feature", geometry: { type: "Point", coordinates: [i.lon, i.lat] },
-    properties: { name: i.name, n: i.n, m: i.m, lm: Math.log2(1 + i.m), root: i.root, day: i.day, url: i.url, iso3: i.iso3 || "" },
+    properties: { name: i.name, n: i.n, m: i.m, lm: Math.log2(1 + i.m), root: i.root, day: i.day, url: i.url, urls: JSON.stringify(i.urls || [i.url]), iso3: i.iso3 || "" },
   }));
   map.getSource("incidents").setData({ type: "FeatureCollection", features: feats });
   applyIncidentFocus();

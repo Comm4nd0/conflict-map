@@ -131,12 +131,14 @@ def aggregate(hours: int = GDELT_WINDOW_HOURS) -> dict:
             a = agg.get(k)
             if a is None:
                 agg[k] = {"name": r["geo_name"], "cc": r["geo_cc"], "lat": r["la"], "lon": r["lo"], "n": 1,
-                          "m": r["mentions"], "root": r["root"], "day": r["day"], "url": r["url"]}
+                          "m": r["mentions"], "root": r["root"], "day": r["day"], "url": r["url"], "urls": [r["url"]]}
             else:
                 a["n"] += 1
                 a["m"] += r["mentions"]
                 a["root"] = max(a["root"], r["root"])
                 a["day"] = max(a["day"], r["day"])
+                if len(a["urls"]) < 3 and r["url"] not in a["urls"]:
+                    a["urls"].append(r["url"])
         incidents = sorted(agg.values(), key=lambda a: -a["m"])[:2500]
         total = con.execute("SELECT COUNT(*) FROM gdelt_events WHERE added>=?", (cutoff,)).fetchone()[0]
         latest = con.execute("SELECT MAX(added) FROM gdelt_events").fetchone()[0]
