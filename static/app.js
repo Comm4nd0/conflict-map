@@ -74,7 +74,15 @@ const map = new maplibregl.Map({
   },
   center: [25, 22], zoom: 2.25, minZoom: 0.8, maxZoom: 9, attributionControl: false, preserveDrawingBuffer: true,
   maxPitch: 0,
+  hash: "map",   // #map=zoom/lat/lon in the URL, so a view can be copied and shared
 });
+const hashParam = (k) => new URLSearchParams(location.hash.slice(1)).get(k);
+function setHashParam(k, v) {
+  const q = new URLSearchParams(location.hash.slice(1));
+  if (v) q.set(k, v); else q.delete(k);
+  history.replaceState(null, "", "#" + q.toString().replace(/%2F/g, "/"));
+}
+const sharedView = !!hashParam("map");
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
 let hoverIso = null;
 
@@ -115,6 +123,21 @@ map.on("load", async () => {
     id: "country-line", type: "line", source: "countries",
     paint: { "line-color": "rgba(210,225,255,0.22)", "line-width": ["interpolate", ["linear"], ["zoom"], 1, 0.5, 6, 1.1] },
   });
+  // day/night: three nested night polygons (sun below 0°, -6°, -12°) give a soft twilight edge
+  map.addSource("night", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "night", type: "fill", source: "night",
+    paint: { "fill-color": "#02030c", "fill-opacity": ["get", "a"], "fill-antialias": false },
+  });
+  map.addSource("sun", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "sun", type: "circle", source: "sun",
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 14, 5, 40], "circle-color": "#ffe9a8",
+             "circle-opacity": 0.12, "circle-blur": 1 },
+  });
+  updateNight();
+  setInterval(updateNight, 60000);
+
   map.addLayer({
     id: "country-hover", type: "line", source: "countries",
     paint: { "line-color": "#ffffff", "line-width": 1.6,
@@ -304,6 +327,8 @@ map.on("load", async () => {
 
   await loadCountries();
   await load();
+  const shared = hashParam("c");
+  if (shared && STATE.conflicts.find(c => c.id === shared)) select(shared, { keepView: true });
   setInterval(load, 60000);
 });
 
@@ -525,10 +550,11 @@ function renderDetail() {
   }));
 }
 
-function select(id) {
+function select(id, opts = {}) {
   selected = id;
   const c = STATE.conflicts.find(x => x.id === id);
-  if (c && c.epicenter) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.55, curve: 1.3, essential: true });
+  setHashParam("c", c ? c.id : null);
+  if (c && c.epicenter && !opts.keepView) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.55, curve: 1.3, essential: true });
   renderMarkers(); renderArcs(); applyInvolvement(); renderStrikes();
   if (c) renderDetail(); else renderList();
 }
@@ -640,8 +666,51 @@ function setStrikeVisibility(on) {
   for (const id of ["strike-paths", "strike-impacts", "projectiles", "flashes"]) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
 }
 
+/* ---------- day / night ---------- */
+function subsolarPoint(date = new Date()) {
+  const rad = Math.PI / 180;
+  const d = date.getTime() / 86400000 - 10957.5;                    // days since J2000.0
+  const g = ((357.529 + 0.98560028 * d) % 360) * rad;               // mean anomaly
+  const q = (280.459 + 0.98564736 * d) % 360;                        // mean longitude (deg)
+  const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * rad;   // ecliptic longitude
+  const e = (23.439 - 0.00000036 * d) * rad;                         // obliquity
+  const decl = Math.asin(Math.sin(e) * Math.sin(L));
+  let RA = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)) / rad; // right ascension (deg)
+  let eqt = q - RA; eqt = ((eqt + 540) % 360) - 180;                 // equation of time (deg)
+  const utc = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+  let lon = -(utc - 12) * 15 - eqt; lon = ((lon + 540) % 360) - 180;
+  return { lat: decl / rad, lon };
+}
+function nightPolygon(sun, altitudeDeg) {
+  const rad = Math.PI / 180, decl = sun.lat * rad, h = altitudeDeg * rad;
+  const ring = [];
+  for (let lon = -180; lon <= 180; lon += 2) {
+    const H = (lon - sun.lon) * rad;
+    const A = Math.sin(decl), B = Math.cos(decl) * Math.cos(H);
+    const R = Math.hypot(A, B), th = Math.atan2(B, A);
+    let phi = Math.asin(Math.max(-1, Math.min(1, Math.sin(h) / R))) - th;   // latitude where the sun sits at `altitude`
+    phi = Math.max(-89.9 * rad, Math.min(89.9 * rad, phi));
+    ring.push([lon, phi / rad]);
+  }
+  const pole = sun.lat > 0 ? -89.9 : 89.9;                           // the pole opposite the sun's declination is dark
+  ring.push([180, pole], [-180, pole], ring[0]);
+  return ring;
+}
+function updateNight() {
+  if (!map.getSource("night")) return;
+  if (!$("#tg-night").checked) { map.getSource("night").setData({ type: "FeatureCollection", features: [] }); map.getSource("sun").setData({ type: "FeatureCollection", features: [] }); return; }
+  const sun = subsolarPoint();
+  const feats = [[0, 0.22], [-6, 0.18], [-12, 0.16]].map(([alt, a]) => ({
+    type: "Feature", properties: { a }, geometry: { type: "Polygon", coordinates: [nightPolygon(sun, alt)] },
+  }));
+  map.getSource("night").setData({ type: "FeatureCollection", features: feats });
+  map.getSource("sun").setData({ type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [sun.lon, sun.lat] } }] });
+}
+$("#tg-night").addEventListener("change", updateNight);
+
 /* ---------- globe / idle rotation ---------- */
-const autoRotate = { paused: false, lastInteraction: performance.now(), on: true };
+const autoRotate = { paused: false, lastInteraction: performance.now(), on: !sharedView };
+if (sharedView) $("#tg-rotate").checked = false;
 function rotateTick() {
   const idle = performance.now() - autoRotate.lastInteraction > 8000;
   if (autoRotate.on && !autoRotate.paused && idle && !selected && !document.hidden && map.getZoom() < 3.2) {

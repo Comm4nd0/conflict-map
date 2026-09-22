@@ -297,8 +297,14 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
                                               "source": a["source"], "published": a["published"]}
                         d.setdefault("sources", []).append(a["link"])
             c["sources"] = sorted(sources.values(), key=lambda s: -s["published"])[:20]
-            c["developments"] = sorted(
-                c.get("developments", []), key=lambda d: d.get("date", ""), reverse=True)[:8]
+            # the model tends to restate earlier developments; keep the first of each near-identical text
+            seen, devs = set(), []
+            for d in sorted(c.get("developments", []), key=lambda d: d.get("date", ""), reverse=True):
+                key = re.sub(r"[^a-z0-9]+", " ", (d.get("text") or "").lower()).strip()[:70]
+                if key and key not in seen:
+                    seen.add(key)
+                    devs.append(d)
+            c["developments"] = devs[:8]
             c["last_seen"] = int(time.time())
             c["first_seen"] = prev.get("first_seen", int(time.time()))
             strikes = c.pop("strikes", None) or []
