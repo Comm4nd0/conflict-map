@@ -98,7 +98,7 @@ button:disabled { opacity: .5; cursor: default; }
 .src .s { color: var(--muted); }
 
 /* markers */
-.mk { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.85); cursor: pointer; position: relative; transition: opacity .6s ease, box-shadow .6s ease, width .4s ease, height .4s ease; }
+.mk { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.85); cursor: pointer; position: absolute; transition: opacity .6s ease, box-shadow .6s ease, width .4s ease, height .4s ease; }
 .mk::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor; opacity: .6; animation: ring 2.4s ease-out infinite; }
 .mk.dim { opacity: .22; }
 .mk.dim::after { animation: none; opacity: 0; transition: opacity .6s; }
