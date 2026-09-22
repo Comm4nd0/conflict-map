@@ -111,6 +111,7 @@ button:disabled { opacity: .5; cursor: default; }
 .sev { display: inline-block; border-radius: 50%; background: var(--st-active); }
 .sev.s5 { width: 16px; height: 16px; } .sev.s3 { width: 11px; height: 11px; } .sev.s1 { width: 7px; height: 7px; }
 .sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.sw.w-ground { background: #e34948; } .sw.inc { background: #ec835a; opacity: .6; width: 7px; height: 7px; }
 .sw.w-missile { background: var(--w-missile);} .sw.w-drone { background: var(--w-drone);} .sw.w-airstrike { background: var(--w-airstrike);} .sw.w-artillery { background: var(--w-artillery);} .sw.w-naval { background: var(--w-naval);}
 #legend .muted { color: var(--muted); }
 .toggle.slider input[type=range] { width: 90px; accent-color: var(--st-active); }

@@ -20,7 +20,8 @@
     <label class="toggle"><input type="checkbox" id="tg-heat" checked> News heat</label>
     <label class="toggle"><input type="checkbox" id="tg-arcs" checked> Support arcs</label>
     <label class="toggle"><input type="checkbox" id="tg-gdelt-arcs"> GDELT actor links</label>
-    <label class="toggle"><input type="checkbox" id="tg-strikes" checked> Strikes</label>
+    <label class="toggle"><input type="checkbox" id="tg-strikes" checked> Attacks</label>
+    <label class="toggle" title="GDELT press-reported fighting, shown from zoom 3"><input type="checkbox" id="tg-incidents" checked> Incidents</label>
     <label class="toggle slider" title="Replay a single day of strikes"><input type="range" id="day" min="0" max="7" value="0"><span id="day-label">all 7 days</span></label>
     <select id="window">
       <option value="24">last 24h</option>
@@ -44,7 +45,8 @@
   <div class="row"><span class="sw st-escalating"></span> escalating <span class="sw st-active"></span> active <span class="sw st-de-escalating"></span> easing <span class="sw st-ceasefire"></span> ceasefire</div>
   <div class="row"><span class="ramp"></span> GDELT conflict-event mentions</div>
   <div class="row"><span class="line a"></span> side A <span class="line b"></span> side B <span class="line other"></span> mediator</div>
-  <div class="row"><span class="sw w-missile"></span> missile <span class="sw w-drone"></span> drone <span class="sw w-airstrike"></span> airstrike <span class="sw w-artillery"></span> artillery <span class="sw w-naval"></span> naval</div>
+  <div class="row"><span class="sw w-missile"></span> missile <span class="sw w-drone"></span> drone <span class="sw w-airstrike"></span> airstrike <span class="sw w-artillery"></span> shelling <span class="sw w-ground"></span> ground <span class="sw w-naval"></span> naval</div>
+  <div class="row"><span class="sw inc"></span> press-reported incident (GDELT, zoom in)</div>
   <div class="row muted">impacts are city-level; ring = country-level only</div>
 </div>
 

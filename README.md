@@ -31,8 +31,15 @@ who is backing whom, and what the consequences are.
    click a conflict (or a country) to focus: parties keep their side colour, everything
    else darkens.
 
-5. **Strikes** – the model also lists strikes reported in each batch (weapon, origin,
-   target, launched/intercepted counts, outcome, source). Place names are resolved
+5. **Attacks** – the model also lists every located attack reported in each batch
+   (weapon incl. shelling/ground/bombing, attacker, optional origin, target,
+   launched/intercepted counts, outcome, source), for internal conflicts as well as
+   cross-border ones. Attacks without a usable origin pulse at the target instead of
+   drawing a trajectory.
+6. **Incidents** – GDELT fight / mass-violence events with coordinates, aggregated per
+   place over the window, drawn as dots from zoom 3 with the most-mentioned source
+   article on hover/click. In focus mode only incidents inside the selected conflict's
+   countries are shown. This is press attention, not a verified incident log. Place names are resolved
    through a local gazetteer (`static/data/places.geojson`, Natural Earth 10m
    populated places, ~7,300 cities); the model's own coordinates are only accepted
    when they fall inside the named country, otherwise the strike snaps to the country

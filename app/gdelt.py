@@ -122,7 +122,23 @@ def aggregate(hours: int = GDELT_WINDOW_HOURS) -> dict:
                 "WHERE added>=? AND a1 IS NOT NULL AND a2 IS NOT NULL AND a1<>a2 "
                 "GROUP BY a1, a2 ORDER BY m DESC LIMIT 40", (cutoff,))
         ]
+        # located violent incidents (fight / mass violence) aggregated per place; the most-mentioned row supplies the source
+        agg: dict = {}
+        for r in con.execute(
+            "SELECT geo_name, geo_cc, ROUND(lat,2) la, ROUND(lon,2) lo, mentions, root, day, url FROM gdelt_events "
+            "WHERE added>=? AND lat IS NOT NULL AND root IN (19,20) ORDER BY mentions DESC", (cutoff,)):
+            k = (r["la"], r["lo"])
+            a = agg.get(k)
+            if a is None:
+                agg[k] = {"name": r["geo_name"], "cc": r["geo_cc"], "lat": r["la"], "lon": r["lo"], "n": 1,
+                          "m": r["mentions"], "root": r["root"], "day": r["day"], "url": r["url"]}
+            else:
+                a["n"] += 1
+                a["m"] += r["mentions"]
+                a["root"] = max(a["root"], r["root"])
+                a["day"] = max(a["day"], r["day"])
+        incidents = sorted(agg.values(), key=lambda a: -a["m"])[:2500]
         total = con.execute("SELECT COUNT(*) FROM gdelt_events WHERE added>=?", (cutoff,)).fetchone()[0]
         latest = con.execute("SELECT MAX(added) FROM gdelt_events").fetchone()[0]
     return {"hours": hours, "total": total, "latest": latest,
-            "countries": countries, "points": points, "pairs": pairs}
+            "countries": countries, "points": points, "pairs": pairs, "incidents": incidents}

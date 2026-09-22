@@ -47,9 +47,11 @@ Each conflict object:
     {{"date": "YYYY-MM-DD", "text": "one sentence", "article_ids": [integer ids from this batch, always cite at least one]}}
   ],
   "strikes": [
-    {{"date": "YYYY-MM-DD", "weapon": "missile" | "drone" | "airstrike" | "artillery" | "naval" | "other",
-      "origin": {{"place": "launch area or null", "country": "ISO3 or null", "lat": float or null, "lon": float or null}},
-      "target": {{"place": "city / facility name", "country": "ISO3", "lat": float, "lon": float}},
+    {{"date": "YYYY-MM-DD",
+      "weapon": "missile" | "drone" | "airstrike" | "artillery" | "shelling" | "ground" | "bombing" | "naval" | "other",
+      "attacker": "party that carried it out (e.g. 'RSF', 'IDF', 'Russia', 'M23', 'unknown')",
+      "origin": {{"place": "launch area or null if unknown / same area", "country": "ISO3 or null", "lat": float or null, "lon": float or null}},
+      "target": {{"place": "city / town / facility name", "country": "ISO3", "lat": float, "lon": float}},
       "launched": integer or null, "intercepted": integer or null,
       "outcome": "short phrase: what was hit / casualties", "article_ids": [integer ids]}}
   ]
@@ -59,7 +61,7 @@ Rules:
 - Parties: list the direct combatants first. A "supporter" must provide material support to one side (arms, money, troops, bases, intelligence). A country that merely comments, sanctions, hosts talks or denies a visa is NOT a supporter; use "mediator" only for active negotiation hosts. Include supporters when the news or well-established public knowledge supports it (e.g. USA/EU states arming Ukraine, Iran arming the Houthis). Use ISO 3166-1 alpha-3 codes (e.g. UKR, RUS, ISR, PSE, IRN, USA, GBR, SDN, YEM, COD). Non-state actors get "country": null but still belong to a side.
 - Keep records COMPLETE on every update: return the full merged party list, the full consequence list (keep prior items still true, add new ones, drop stale ones), and the 6 most recent developments (prior ones plus new ones).
 - Be factual and neutral. Cite the article ids that support each development. Never invent developments not in the batch.
-- Strikes: ONLY strikes reported in THIS batch of news items (never from memory). One entry per named target place per attack; if an article lists several cities hit, emit one entry per city. If the target is only given as a country or region, put that in "place" and set lat/lon to your best estimate. Origin is usually a region ("Crimea", "Iran", "Russia") - give its ISO3 and a rough lat/lon. Use exact numbers from the article for launched/intercepted, else null. Omit "strikes" entirely if the batch reports none for that conflict.
+- Strikes = ANY located attack reported in THIS batch (never from memory): airstrikes, missiles, drones, artillery/shelling, ground assaults on towns, bombings/IEDs, naval attacks, massacres. This explicitly includes INTERNAL conflicts (RSF shelling El Fasher, IDF strikes on Gaza City, M23 taking Goma, Al-Qaeda attacking a Malian base) - the target is the place hit, the attacker is the party, and origin may be null. One entry per named target place per attack; if an article lists several places hit, emit one entry per place. If the target is only given as a region, put that in "place" and set lat/lon to your best estimate. For cross-border launches give the origin region ("Crimea", "Iran") with ISO3 and rough lat/lon. Use exact numbers from the article for launched/intercepted, else null. Omit "strikes" only if the batch reports no attacks for that conflict.
 - Dates: use the article's date. Today is {{today}}.
 - Output valid JSON only, no markdown fences, no commentary. Use COMPACT JSON (no indentation or line breaks) - the output must stay short."""
 
@@ -164,7 +166,7 @@ def _valid(c: dict) -> bool:
     return bool(c.get("id")) and bool(c.get("name")) and isinstance(c.get("parties"), list)
 
 
-WEAPONS = {"missile", "drone", "airstrike", "artillery", "naval", "other"}
+WEAPONS = {"missile", "drone", "airstrike", "artillery", "shelling", "ground", "bombing", "naval", "other"}
 
 
 def _store_strikes(con, conflict_id: str, strikes: list, art: dict) -> int:
@@ -197,13 +199,14 @@ def _store_strikes(con, conflict_id: str, strikes: list, art: dict) -> int:
         cur = con.execute(
             "INSERT OR IGNORE INTO strikes(conflict_id,date,weapon,origin_name,origin_lat,origin_lon,origin_country,"
             "origin_precision,target_name,target_lat,target_lon,target_country,target_precision,launched,intercepted,"
-            "outcome,link,title,source,created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "outcome,link,title,source,created,attacker) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (conflict_id, date, weapon,
              origin and origin["name"], origin and origin["lat"], origin and origin["lon"],
              origin and origin["country"], origin and origin["precision"],
              target["name"], target["lat"], target["lon"], target["country"], target["precision"],
              _int(st.get("launched")), _int(st.get("intercepted")), (st.get("outcome") or "")[:300],
-             src and src["link"], src and src["title"], src and src["source"], int(time.time())))
+             src and src["link"], src and src["title"], src and src["source"], int(time.time()),
+             (st.get("attacker") or "")[:80] or None))
         n += cur.rowcount
     return n
 

@@ -4,7 +4,8 @@ const STATUS_COLOR = {
   ceasefire: "#0ca30c", frozen: "#898781",
 };
 const SIDE_COLOR = { A: "#3987e5", B: "#d95926", other: "#9085e9" };
-const WEAPON_COLOR = { missile: "#ffffff", drone: "#eda100", airstrike: "#e87ba4", artillery: "#c3c2b7", naval: "#1baf7a", other: "#9085e9" };
+const WEAPON_COLOR = { missile: "#ffffff", drone: "#eda100", airstrike: "#e87ba4", artillery: "#c3c2b7", shelling: "#c3c2b7",
+                       ground: "#e34948", bombing: "#f2a33a", naval: "#1baf7a", other: "#9085e9" };
 const LAND = "#3f4048", HEAT = "#f2a33a";
 
 let COUNTRIES = {};          // iso3 -> {iso3, iso2, name, lat, lon}
@@ -236,6 +237,32 @@ map.on("load", async () => {
       .setHTML(strikeHtml(p) + (p.link ? `<br><a href="${esc(p.link)}" target="_blank">${esc(p.title || "source")} ↗</a>` : "")).addTo(map);
   });
 
+  // ---- GDELT located incidents (fight / mass-violence events with a place and a source)
+  map.addSource("incidents", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "incidents", type: "circle", source: "incidents", minzoom: 3,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, ["+", 1.5, ["*", 0.6, ["get", "lm"]]], 8, ["+", 3, ["*", 1.6, ["get", "lm"]]]],
+      "circle-color": ["match", ["get", "root"], 20, "#d03b3b", "#ec835a"],
+      "circle-opacity": ["interpolate", ["linear"], ["zoom"], 3, 0.35, 5, 0.6],
+      "circle-stroke-color": "rgba(0,0,0,0.5)", "circle-stroke-width": 0.6,
+      "circle-opacity-transition": { duration: 650 },
+    },
+  }, "capital-dots");
+  map.on("mousemove", "incidents", (e) => {
+    const p = e.features[0].properties; const tip = $("#tooltip");
+    tip.innerHTML = incidentHtml(p);
+    tip.hidden = false; tip.style.left = (e.point.x + 14) + "px"; tip.style.top = (e.point.y + 14) + "px";
+    map.getCanvas().style.cursor = "pointer";
+  });
+  map.on("mouseleave", "incidents", () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
+  map.on("click", "incidents", (e) => {
+    e.originalEvent._handled = true;
+    const p = e.features[0].properties;
+    new maplibregl.Popup({ closeButton: true, maxWidth: "320px" }).setLngLat(e.lngLat)
+      .setHTML(incidentHtml(p) + (p.url ? `<br><a href="${esc(p.url)}" target="_blank">${esc(p.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60))} ↗</a>` : "")).addTo(map);
+  });
+
   // hover outline
   map.on("mousemove", "country-fill", (e) => {
     const iso = e.features[0].properties.ADM0_A3;
@@ -303,6 +330,7 @@ function render() {
   renderArcs();
   renderGdeltArcs();
   renderStrikes();
+  renderIncidents();
   if (selected && STATE.conflicts.find(c => c.id === selected)) renderDetail(); else { selected = null; renderList(); }
   applyInvolvement();
 }
@@ -417,6 +445,7 @@ function applyInvolvement() {
   map.setPaintProperty("strike-impacts", "circle-opacity", own(["case", ["==", ["get", "precision"], "country"], 0.08, 0.55], 0.1));
   map.setPaintProperty("strike-impacts", "circle-stroke-opacity", own(0.9, 0.12));
   setFocus(!!c);
+  if (map.getLayer("incidents")) applyIncidentFocus();
 }
 
 function setFocus(on) {
@@ -475,10 +504,10 @@ function renderDetail() {
     <div class="cons">${(c.consequences || []).map(x => `<div class="con"><span class="cat">${esc(x.category)}</span><span>${esc(x.text)}${(x.affects || []).length ? ` <span style="opacity:.6">${x.affects.map(a => flag(norm(a))).join(" ")}</span>` : ""}</span></div>`).join("") || "<div class='empty'>none recorded</div>"}</div>
     <h3>Latest developments</h3>
     ${(c.developments || []).map(x => `<div class="dev"><span class="date">${esc(x.date)}</span><span>${esc(x.text)}${(x.sources || []).map(u => ` <a href="${esc(u)}" target="_blank" title="${esc(u)}">↗</a>`).join("")}</span></div>`).join("")}
-    <h3>Reported strikes (7 days)</h3>
+    <h3>Reported attacks (7 days)</h3>
     ${conflictStrikes(c.id).map(st => `<div class="strike" data-id="${st.id}">
       <span class="date">${esc(st.date.slice(5).replace("-", "/"))}</span><span class="w" style="background:${WEAPON_COLOR[st.weapon] || WEAPON_COLOR.other}"></span>
-      <span class="body"><span class="route">${st.origin_name ? esc(st.origin_name) + " → " : ""}${esc(st.target_name)}</span><span class="prec">${esc(st.target_precision)}</span><br>
+      <span class="body"><span class="route">${(st.attacker && st.attacker !== "unknown") ? esc(st.attacker) + " → " : st.origin_name ? esc(st.origin_name) + " → " : ""}${esc(st.target_name)}</span><span class="prec">${esc(st.target_precision)}</span><br>
       <span class="meta">${esc(st.weapon)}${st.launched != null ? ` · ${st.launched} launched` : ""}${st.intercepted != null ? ` · ${st.intercepted} intercepted` : ""}${st.outcome ? ` · ${esc(st.outcome)}` : ""}</span></span>
     </div>`).join("") || "<div class='empty'>none reported in the feeds</div>"}
     <h3>Sources</h3>
@@ -497,6 +526,26 @@ function select(id) {
   if (c && c.epicenter) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.55, curve: 1.3, essential: true });
   renderMarkers(); renderArcs(); applyInvolvement(); renderStrikes();
   if (c) renderDetail(); else renderList();
+}
+
+/* ---------- GDELT incidents ---------- */
+function incidentHtml(p) {
+  const kind = p.root == 20 ? "mass violence" : "fighting / armed clash";
+  const day = String(p.day || ""); const d = day.length === 8 ? `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6)}` : day;
+  return `<b>${esc(p.name || "")}</b><br>${esc(kind)} · ${p.n} event${p.n == 1 ? "" : "s"} · ${p.m} mentions · ${esc(d)}<br><span style="opacity:.6">GDELT, press-reported</span>`;
+}
+function renderIncidents() {
+  const feats = (STATE.gdelt.incidents || []).map(i => ({
+    type: "Feature", geometry: { type: "Point", coordinates: [i.lon, i.lat] },
+    properties: { name: i.name, n: i.n, m: i.m, lm: Math.log2(1 + i.m), root: i.root, day: i.day, url: i.url, iso3: i.iso3 || "" },
+  }));
+  map.getSource("incidents").setData({ type: "FeatureCollection", features: feats });
+  applyIncidentFocus();
+}
+function applyIncidentFocus() {
+  const c = STATE.conflicts.find(x => x.id === selected);
+  const isos = c ? [...new Set(c.parties.map(p => norm(p.country)).filter(Boolean))] : [];
+  map.setFilter("incidents", isos.length ? ["in", ["get", "iso3"], ["literal", isos]] : null);
 }
 
 /* ---------- strikes ---------- */
@@ -523,7 +572,8 @@ function trajectory(from, to) {
 }
 
 function strikeHtml(p) {
-  return `<b>${esc(p.origin_name ? p.origin_name + " → " : "")}${esc(p.target_name)}</b> <span style="opacity:.6">${esc(p.target_precision)}</span><br>` +
+  const who = p.attacker && p.attacker !== "unknown" ? p.attacker : (p.origin_name || "");
+  return `<b>${esc(who ? who + " → " : "")}${esc(p.target_name)}</b> <span style="opacity:.6">${esc(p.target_precision)}</span><br>` +
     `${esc(p.date)} · ${esc(p.weapon)}${p.launched != null && p.launched !== "" ? ` · ${p.launched} launched` : ""}${p.intercepted != null && p.intercepted !== "" ? ` · ${p.intercepted} intercepted` : ""}` +
     (p.outcome ? `<br>${esc(p.outcome)}` : "") + (p.source ? `<br><span style="opacity:.6">${esc(p.source)}</span>` : "");
 }
@@ -539,7 +589,9 @@ function renderStrikes() {
     impacts.push({ type: "Feature", geometry: { type: "Point", coordinates: to },
       properties: { ...st, color, r, precision: st.target_precision, conflict: st.conflict_id } });
     let path = null;
-    if (st.origin_lat != null && st.origin_precision !== "country" || (st.origin_lat != null && st.target_precision !== "country")) {
+    const crossBorder = st.origin_country && st.target_country && st.origin_country !== st.target_country;
+    const usableOrigin = st.origin_lat != null && (st.origin_precision !== "country" || crossBorder);
+    if (usableOrigin) {
       path = trajectory([st.origin_lon, st.origin_lat], to);
       paths.push({ type: "Feature", geometry: { type: "LineString", coordinates: path }, properties: { color, conflict: st.conflict_id } });
     }
@@ -567,6 +619,10 @@ function tickStrikes() {
       } else if (t >= 0.55 && t < 0.85) {
         const f = (t - 0.55) / 0.3;
         flashes.push({ type: "Feature", geometry: { type: "Point", coordinates: it.to }, properties: { color: it.color, r: 0.2 + f, a: 1 - f } });
+      } else if (!it.path && t < 0.3) {
+        // no known origin (internal conflict, unspecified launch site): a second, softer pulse so the impact still reads as active
+        const f = t / 0.3;
+        flashes.push({ type: "Feature", geometry: { type: "Point", coordinates: it.to }, properties: { color: it.color, r: 0.15 + f * 0.7, a: 0.7 * (1 - f) } });
       }
     }
     map.getSource("projectiles").setData({ type: "FeatureCollection", features: proj });
@@ -599,6 +655,7 @@ $("#tg-rotate").addEventListener("change", e => { autoRotate.on = e.target.check
 
 /* ---------- controls ---------- */
 $("#tg-strikes").addEventListener("change", e => setStrikeVisibility(e.target.checked));
+$("#tg-incidents").addEventListener("change", e => map.setLayoutProperty("incidents", "visibility", e.target.checked ? "visible" : "none"));
 $("#day").addEventListener("input", () => {
   const d = dayFilter();
   $("#day-label").textContent = d === 0 ? "all 7 days" : d === 1 ? "today" : d === 2 ? "yesterday" : dayString(d).slice(5);

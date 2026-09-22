@@ -16,6 +16,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 log = logging.getLogger("server")
 app = FastAPI(title="conflict-map")
 _lock = threading.Lock()
+_agg_cache: dict = {}
+
+
+def _aggregate_cached(hours: int):
+    now = time.time()
+    hit = _agg_cache.get(hours)
+    if hit and now - hit[0] < 60:
+        return hit[1]
+    data = gdelt.aggregate(hours)
+    _agg_cache[hours] = (now, data)
+    return data
 
 
 def _refresh_job(skip_llm=False):
@@ -56,7 +67,7 @@ def state(hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
             "busy": _lock.locked(),
             "now": int(time.time()),
         }
-    agg = gdelt.aggregate(hours)
+    agg = _aggregate_cached(hours)
     tbl = countries.table()
     # translate GDELT FIPS -> ISO3 and CAMEO pairs -> ISO3 with centroids
     heat = {}
@@ -71,13 +82,17 @@ def state(hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
         a, b = countries.iso3(p["a1"]), countries.iso3(p["a2"])
         if a and b and a != b:
             pairs.append({"a": a, "b": b, "mentions": p["mentions"], "events": p["events"]})
+    incidents = []
+    for i in agg["incidents"]:
+        rec = tbl["fips"].get(i["cc"])
+        incidents.append({**i, "iso3": rec["iso3"] if rec else None})
     conflicts.sort(key=lambda c: (-(c.get("severity") or 0), -(c.get("last_seen") or 0)))
     return JSONResponse({
         "meta": meta,
         "conflicts": conflicts,
         "strikes": strikes,
         "gdelt": {"hours": agg["hours"], "total": agg["total"], "latest": agg["latest"],
-                  "heat": heat, "points": agg["points"], "pairs": pairs},
+                  "heat": heat, "points": agg["points"], "pairs": pairs, "incidents": incidents},
     })
 
 

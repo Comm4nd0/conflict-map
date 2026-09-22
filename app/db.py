@@ -56,6 +56,9 @@ def connect() -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(strikes)")}
+    if "attacker" not in cols:
+        con.execute("ALTER TABLE strikes ADD COLUMN attacker TEXT")
     return con
 
 
