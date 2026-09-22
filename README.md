@@ -78,6 +78,21 @@ uv run python -m app.pipeline --skip-llm # just fetch data
 Env vars: `LLM_BASE`, `LLM_MODEL`, `GDELT_BACKFILL_HOURS` (48), `GDELT_WINDOW_HOURS`,
 `REFRESH_MINUTES` (30), `ARTICLES_PER_BATCH` (40).
 
+## Public viewer (Luma001)
+
+The Hetzner box has no GPU, so it only *serves* the map. The home machine runs the
+pipeline and pushes a WAL-safe snapshot of `data/conflict.db` after every refresh
+(`PUSH_TARGET=luma:/root/conflict-map/data`, set in `run.sh`; the file is swapped in
+atomically with `mv`). The container runs with `SERVE_ONLY=1`: read-only database,
+no pipeline loop, `/api/refresh` returns 403, the Refresh button is hidden.
+
+```
+/root/conflict-map          git clone of this repo (public), docker compose, port 172.17.0.1:8030
+/root/caddy/Caddyfile       conflicts.lumatechsolutions.co.uk { reverse_proxy 172.17.0.1:8030 }
+```
+
+Deploy an update: `ssh luma 'cd /root/conflict-map && git pull --ff-only && docker compose up -d --build'`.
+
 ## Notes / known limits
 
 - GDELT is noisy and English-media-biased (the US always glows). The heat layer
