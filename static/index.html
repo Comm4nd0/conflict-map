@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conflict Map</title>
+<link rel="stylesheet" href="/static/vendor/maplibre-gl.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand">
+    <span class="dot"></span>
+    <h1>Conflict Map</h1>
+    <span class="sub">news-driven view of active conflicts</span>
+  </div>
+  <div class="controls">
+    <label class="toggle"><input type="checkbox" id="tg-heat" checked> News heat</label>
+    <label class="toggle"><input type="checkbox" id="tg-arcs" checked> Support arcs</label>
+    <label class="toggle"><input type="checkbox" id="tg-gdelt-arcs"> GDELT actor links</label>
+    <select id="window">
+      <option value="24">last 24h</option>
+      <option value="48" selected>last 48h</option>
+    </select>
+    <button id="refresh" title="Fetch feeds + GDELT and re-run extraction">Refresh</button>
+  </div>
+  <div class="status" id="status">loading…</div>
+</header>
+
+<div id="main">
+  <div id="map"></div>
+  <aside id="panel">
+    <div id="list"></div>
+    <div id="detail" hidden></div>
+  </aside>
+</div>
+
+<div id="legend">
+  <div class="row"><span class="sev s5"></span><span class="sev s3"></span><span class="sev s1"></span> conflict severity</div>
+  <div class="row"><span class="sw st-escalating"></span> escalating <span class="sw st-active"></span> active <span class="sw st-de-escalating"></span> easing <span class="sw st-ceasefire"></span> ceasefire</div>
+  <div class="row"><span class="ramp"></span> GDELT conflict-event mentions</div>
+  <div class="row"><span class="line a"></span> side A <span class="line b"></span> side B <span class="line other"></span> mediator</div>
+</div>
+
+<div id="tooltip" hidden></div>
+
+<script src="/static/vendor/maplibre-gl.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
