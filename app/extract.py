@@ -181,6 +181,8 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
         {"role": "system", "content": SYSTEM.replace("{today}", today)},
         {"role": "user", "content": user},
     ])
+    with db() as con:
+        set_state(con, "last_raw", {"at": int(time.time()), "text": text[-6000:]})
     try:
         result = _parse_json(text)
     except Exception:  # noqa: BLE001

@@ -93,6 +93,14 @@ def resolve(place: str | None, country: str | None, lat=None, lon=None) -> dict 
         if not cands:
             keys = difflib.get_close_matches(n, idx.keys(), n=3, cutoff=0.86)
             cands = [c for k in keys for c in idx[k]]
+        if not cands:
+            # "ufa oil" -> "ufa"; "taiz province" -> "taiz": try shorter leading word groups
+            words = n.split()
+            for k in range(len(words) - 1, 0, -1):
+                sub = " ".join(words[:k])
+                cands = idx.get(ALIASES.get(sub, sub)) or []
+                if cands:
+                    break
         if iso3:
             same = [c for c in cands if c[0] == iso3]
             cands = same or ([] if len(n) < 5 else cands)
