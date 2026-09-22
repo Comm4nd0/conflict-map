@@ -1,0 +1,6 @@
+data/
+.venv/
+.git/
+__pycache__/
+scripts/
+*.md

@@ -3,7 +3,7 @@ import sqlite3
 import time
 from contextlib import contextmanager
 
-from .config import DATA_DIR, DB_PATH
+from .config import DATA_DIR, DB_PATH, SERVE_ONLY
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS gdelt_events (
@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
 
 def connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if SERVE_ONLY:
+        # the file is replaced atomically by the home pipeline; open fresh, read-only, no WAL side files
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
+        con.row_factory = sqlite3.Row
+        return con
     con = sqlite3.connect(DB_PATH, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")

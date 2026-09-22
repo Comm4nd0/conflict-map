@@ -15,6 +15,11 @@ GDELT_BACKFILL_HOURS = int(os.environ.get("GDELT_BACKFILL_HOURS", "48"))
 GDELT_WINDOW_HOURS = int(os.environ.get("GDELT_WINDOW_HOURS", "48"))
 
 REFRESH_MINUTES = int(os.environ.get("REFRESH_MINUTES", "30"))
+
+# SERVE_ONLY=1: read-only viewer (no GDELT/feeds/LLM), used on the public server.
+SERVE_ONLY = os.environ.get("SERVE_ONLY", "0") == "1"
+# After each refresh, copy the database to this scp target (e.g. "luma:/root/conflict-map/data"). Empty = off.
+PUSH_TARGET = os.environ.get("PUSH_TARGET", "")
 ARTICLES_PER_BATCH = int(os.environ.get("ARTICLES_PER_BATCH", "40"))
 
 FEEDS = {

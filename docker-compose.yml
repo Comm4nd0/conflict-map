@@ -1,0 +1,20 @@
+# Deployed at /root/conflict-map on Luma001. Caddy proxies
+# conflicts.lumatechsolutions.co.uk -> 172.17.0.1:8030.
+# Viewer only: the database is pushed here by the home pipeline (see README).
+services:
+  web:
+    build: .
+    image: conflict-map:latest
+    container_name: conflict-map-web
+    ports:
+      - "172.17.0.1:8030:8000"
+    environment:
+      SERVE_ONLY: "1"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

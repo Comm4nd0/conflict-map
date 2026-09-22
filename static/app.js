@@ -346,6 +346,7 @@ function renderStatus() {
   else if (m.unprocessed) parts.push(`${m.unprocessed} articles queued`);
   $("#status").textContent = parts.join(" · ");
   $("#refresh").disabled = !!m.busy;
+  $("#refresh").hidden = !!m.serve_only;
 }
 
 function renderHeat() {

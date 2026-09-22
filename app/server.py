@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import countries, gdelt, pipeline
-from .config import GDELT_WINDOW_HOURS, REFRESH_MINUTES, STATIC_DIR
+from .config import GDELT_WINDOW_HOURS, REFRESH_MINUTES, SERVE_ONLY, STATIC_DIR
 from .db import all_conflicts, db, get_state
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -47,7 +47,17 @@ async def _loop():
 
 @app.on_event("startup")
 async def _start():
+    if SERVE_ONLY:
+        log.info("SERVE_ONLY: viewer mode, no pipeline")
+        return
     asyncio.create_task(_loop())
+
+
+@app.get("/healthz")
+def healthz():
+    with db() as con:
+        n = con.execute("SELECT COUNT(*) FROM conflicts").fetchone()[0]
+    return {"ok": True, "conflicts": n, "serve_only": SERVE_ONLY}
 
 
 @app.get("/api/state")
@@ -65,6 +75,7 @@ def state(hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
             "skipped": con.execute("SELECT COUNT(*) FROM articles WHERE processed=2").fetchone()[0],
             "sources": con.execute("SELECT COUNT(DISTINCT source) FROM articles WHERE published > strftime('%s','now') - 7*86400").fetchone()[0],
             "busy": _lock.locked(),
+            "serve_only": SERVE_ONLY,
             "now": int(time.time()),
         }
     agg = _aggregate_cached(hours)
@@ -103,6 +114,8 @@ def country_table():
 
 @app.post("/api/refresh")
 async def refresh(skip_llm: bool = False):
+    if SERVE_ONLY:
+        return JSONResponse({"error": "viewer mode: refreshes run on the home pipeline"}, status_code=403)
     asyncio.create_task(asyncio.to_thread(_refresh_job, skip_llm))
     return {"started": not _lock.locked()}
 
