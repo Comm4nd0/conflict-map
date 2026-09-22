@@ -49,10 +49,24 @@ function arc(from, to, n = 40) {
   return pts;
 }
 
+/* ---------- layout ---------- */
+const mobileMQ = window.matchMedia("(max-width: 900px)");
+const coarseMQ = window.matchMedia("(pointer: coarse)");
+const isMobile = () => mobileMQ.matches;
+/* zoom at which the whole globe fits the narrow side of the map (phones start zoomed out) */
+function fitGlobeZoom() {
+  const m = document.getElementById("map");
+  const d = 0.92 * Math.min(m.clientWidth || innerWidth, m.clientHeight || innerHeight);
+  return Math.max(0.8, Math.min(2.25, Math.log2(d * Math.PI / 512)));
+}
+
 /* ---------- map ---------- */
 const OCEAN = "#070b14";
 const HEAT_COLOR_EXPR = ["interpolate", ["linear"], ["coalesce", ["feature-state", "heat"], 0], 0, LAND, 1, HEAT];
 const HEAT_OPACITY_EXPR = ["+", 0.12, ["*", 0.6, ["coalesce", ["feature-state", "heat"], 0]]];
+const hashParam = (k) => new URLSearchParams(location.hash.slice(1)).get(k);
+// read before the map exists: with hash: "map" it writes its own #map= on load
+const sharedView = !!hashParam("map");
 const map = new maplibregl.Map({
   container: "map",
   style: {
@@ -72,17 +86,15 @@ const map = new maplibregl.Map({
       { id: "relief", type: "raster", source: "relief", paint: { "raster-opacity": 1, "raster-fade-duration": 150 } },
     ],
   },
-  center: [25, 22], zoom: 2.25, minZoom: 0.8, maxZoom: 9, attributionControl: false, preserveDrawingBuffer: true,
+  center: [25, 22], zoom: isMobile() ? fitGlobeZoom() : 2.25, minZoom: 0.8, maxZoom: 9, attributionControl: false, preserveDrawingBuffer: true,
   maxPitch: 0,
   hash: "map",   // #map=zoom/lat/lon in the URL, so a view can be copied and shared
 });
-const hashParam = (k) => new URLSearchParams(location.hash.slice(1)).get(k);
 function setHashParam(k, v) {
   const q = new URLSearchParams(location.hash.slice(1));
   if (v) q.set(k, v); else q.delete(k);
   history.replaceState(null, "", "#" + q.toString().replace(/%2F/g, "/"));
 }
-const sharedView = !!hashParam("map");
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
 let hoverIso = null;
 
@@ -255,9 +267,7 @@ map.on("load", async () => {
   map.on("mouseleave", "strike-impacts", () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
   map.on("click", "strike-impacts", (e) => {
     e.originalEvent._handled = true;
-    const p = e.features[0].properties;
-    if (p.link) openArticle(p.link, { title: p.title, source: p.source, context: strikeHtml(p) });
-    else new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(e.lngLat).setHTML(strikeHtml(p)).addTo(map);
+    openStrikeFeature(e.features[0], e.lngLat);
   });
 
   // ---- GDELT located incidents (fight / mass-violence events with a place and a source)
@@ -281,10 +291,7 @@ map.on("load", async () => {
   map.on("mouseleave", "incidents", () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
   map.on("click", "incidents", (e) => {
     e.originalEvent._handled = true;
-    const p = e.features[0].properties;
-    let urls = [];
-    try { urls = JSON.parse(p.urls || "[]"); } catch (_) { urls = p.url ? [p.url] : []; }
-    if (urls.length) openArticle(urls[0], { alternatives: urls, context: incidentHtml(p) + `<div style="opacity:.55;margin-top:4px">Articles GDELT tagged with this place. Placement is automatic and can be wrong.</div>` });
+    openIncidentFeature(e.features[0]);
   });
 
   // hover outline
@@ -315,6 +322,7 @@ map.on("load", async () => {
   map.on("mouseleave", "country-fill", () => { tip.hidden = true; });
   map.on("click", "country-fill", (e) => {
     if (e.originalEvent._handled) return;          // an incident / attack circle on top took this click
+    if (fuzzyTap(e)) return;                        // a finger landed next to one
     const iso = e.features[0].properties.ADM0_A3;
     const list = conflictsFor(iso);
     if (!list.length) return;                       // fall through to the map click (deselect)
@@ -555,7 +563,9 @@ function renderDetail() {
   }));
   d.querySelectorAll(".strike").forEach(el => el.addEventListener("click", () => {
     const st = STATE.strikes.find(x => x.id === +el.dataset.id);
-    if (st) map.flyTo({ center: [st.target_lon, st.target_lat], zoom: Math.max(map.getZoom(), 5.5), speed: 0.9 });
+    if (!st) return;
+    if (isMobile() && $("#panel").dataset.sheet === "full") setSheet("peek");
+    map.flyTo({ center: [st.target_lon, st.target_lat], zoom: Math.max(map.getZoom(), 5.5), speed: 0.9, padding: sheetPadding() });
   }));
 }
 
@@ -563,7 +573,8 @@ function select(id, opts = {}) {
   selected = id;
   const c = STATE.conflicts.find(x => x.id === id);
   setHashParam("c", c ? c.id : null);
-  if (c && c.epicenter && !opts.keepView) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.55, curve: 1.3, essential: true });
+  if (c && isMobile() && $("#panel").dataset.sheet === "min") setSheet("peek");
+  if (c && c.epicenter && !opts.keepView) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.55, curve: 1.3, essential: true, padding: sheetPadding() });
   renderMarkers(); renderArcs(); applyInvolvement(); renderStrikes();
   if (c) renderDetail(); else renderList();
 }
@@ -574,6 +585,7 @@ const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } 
 async function openArticle(url, opts = {}) {
   const r = $("#reader"); const seq = ++readerSeq;
   $("#list").hidden = true; $("#detail").hidden = true; r.hidden = false; readerOpen = true; reveal(r);
+  if (isMobile()) setSheet("full");
   $("#panel").scrollTop = 0;
   const alts = opts.alternatives && opts.alternatives.length > 1 ? opts.alternatives : null;
   const altHtml = alts ? `<div class="alt">${alts.map(u => `<div class="${u === url ? "on" : ""}" data-url="${esc(u)}">${esc(host(u))}</div>`).join("")}</div>` : "";
@@ -604,7 +616,33 @@ async function openArticle(url, opts = {}) {
 }
 function closeReader() {
   readerOpen = false; $("#reader").hidden = true;
+  if (isMobile() && $("#panel").dataset.sheet === "full") setSheet("peek");
+  $("#panel").scrollTop = 0;
   if (selected && STATE.conflicts.find(c => c.id === selected)) renderDetail(); else renderList();
+}
+
+function openStrikeFeature(f, lngLat) {
+  const p = f.properties;
+  if (p.link) openArticle(p.link, { title: p.title, source: p.source, context: strikeHtml(p) });
+  else new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(lngLat).setHTML(strikeHtml(p)).addTo(map);
+}
+function openIncidentFeature(f) {
+  const p = f.properties;
+  let urls = [];
+  try { urls = JSON.parse(p.urls || "[]"); } catch (_) { urls = p.url ? [p.url] : []; }
+  if (urls.length) openArticle(urls[0], { alternatives: urls, context: incidentHtml(p) + `<div style="opacity:.55;margin-top:4px">Articles GDELT tagged with this place. Placement is automatic and can be wrong.</div>` });
+}
+/* fingers are imprecise: on touch screens a tap near a strike / incident circle counts as a hit */
+function fuzzyTap(e) {
+  if (!coarseMQ.matches || e.originalEvent._handled) return false;
+  const r = 14, { x, y } = e.point;
+  const layers = ["strike-impacts", "incidents"].filter(id => map.getLayer(id) && map.getLayoutProperty(id, "visibility") !== "none");
+  const hits = map.queryRenderedFeatures([[x - r, y - r], [x + r, y + r]], { layers });
+  if (!hits.length) return false;
+  e.originalEvent._handled = true;
+  const f = hits.find(h => h.layer.id === "strike-impacts") || hits[0];
+  if (f.layer.id === "strike-impacts") openStrikeFeature(f, e.lngLat); else openIncidentFeature(f);
+  return true;
 }
 
 /* ---------- GDELT incidents ---------- */
@@ -796,4 +834,56 @@ $("#refresh").addEventListener("click", async () => {
   await fetch("/api/refresh", { method: "POST" });
   setTimeout(load, 1500);
 });
-map.on("click", (e) => { if (e.originalEvent._handled) return; if (selected) select(null); });
+map.on("click", (e) => {
+  if (document.body.classList.contains("menu-open") || document.body.classList.contains("legend-open")) {
+    toggleMenu(false); toggleLegend(false); return;   // first tap on the map just closes an open menu
+  }
+  if (e.originalEvent._handled || fuzzyTap(e)) return;
+  if (selected) select(null);
+});
+
+/* ---------- mobile: layers menu, legend, bottom sheet ---------- */
+function toggleMenu(on = !document.body.classList.contains("menu-open")) {
+  document.body.classList.toggle("menu-open", on);
+  $("#menu-btn").setAttribute("aria-expanded", on);
+  if (on) toggleLegend(false);
+}
+function toggleLegend(on = !document.body.classList.contains("legend-open")) {
+  document.body.classList.toggle("legend-open", on);
+  $("#legend-btn").setAttribute("aria-expanded", on);
+  if (on) toggleMenu(false);
+}
+$("#menu-btn").addEventListener("click", () => toggleMenu());
+$("#legend-btn").addEventListener("click", () => toggleLegend());
+
+const SHEET = ["min", "peek", "full"];
+function setSheet(state) {
+  const p = $("#panel");
+  if (p.dataset.sheet === state) return;
+  p.dataset.sheet = state;
+  if (state === "min") p.scrollTop = 0;
+}
+const sheetStep = (d) => setSheet(SHEET[Math.max(0, Math.min(2, SHEET.indexOf($("#panel").dataset.sheet) + d))]);
+/* map padding so flyTo targets land in the part of the map the sheet doesn't cover */
+function sheetPadding() {
+  if (!isMobile()) return { top: 0, bottom: 0, left: 0, right: 0 };
+  const p = $("#panel"), h = p.dataset.sheet === "full" ? 0.42 * $("#main").clientHeight : p.offsetHeight;
+  return { top: 0, bottom: Math.round(h), left: 0, right: 0 };
+}
+{
+  const handle = $("#sheet-handle");
+  let y0 = null, moved = false;
+  handle.addEventListener("touchstart", (e) => { y0 = e.touches[0].clientY; moved = false; }, { passive: true });
+  handle.addEventListener("touchmove", (e) => { if (y0 !== null && Math.abs(e.touches[0].clientY - y0) > 8) moved = true; }, { passive: true });
+  handle.addEventListener("touchend", (e) => {
+    if (y0 === null) return;
+    const dy = e.changedTouches[0].clientY - y0; y0 = null;
+    if (moved && Math.abs(dy) > 30) { e.preventDefault(); sheetStep(dy < 0 ? 1 : -1); }
+  });
+  handle.addEventListener("click", () => {
+    const s = $("#panel").dataset.sheet;
+    setSheet(s === "min" ? "peek" : s === "peek" ? "full" : "min");
+  });
+}
+mobileMQ.addEventListener("change", () => { toggleMenu(false); toggleLegend(false); map.setPadding(sheetPadding()); });
+if (isMobile() && !sharedView) map.setPadding(sheetPadding());   // start with the globe above the sheet

@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#121214">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Conflict Map</title>
 <link rel="stylesheet" href="/static/vendor/maplibre-gl.css">
 <link rel="stylesheet" href="/static/style.css">
@@ -14,7 +17,8 @@
     <h1>Conflict Map</h1>
     <span class="sub">news-driven view of active conflicts</span>
   </div>
-  <div class="controls">
+  <button id="menu-btn" class="mobile-only" aria-expanded="false" aria-controls="controls" title="Layers &amp; settings">Layers</button>
+  <div class="controls" id="controls">
     <label class="toggle"><input type="checkbox" id="tg-globe" checked> Globe</label>
     <label class="toggle"><input type="checkbox" id="tg-rotate" checked> Spin</label>
     <label class="toggle" title="Live day/night from the sun's position"><input type="checkbox" id="tg-night" checked> Day/night</label>
@@ -35,24 +39,24 @@
 
 <div id="main">
   <div id="map"></div>
-  <aside id="panel">
+  <aside id="panel" data-sheet="peek">
+    <button id="sheet-handle" class="mobile-only" aria-label="Expand or collapse the panel"><span></span></button>
     <div id="list"></div>
     <div id="detail" hidden></div>
     <div id="reader" hidden></div>
   </aside>
+  <button id="legend-btn" class="mobile-only" aria-expanded="false" title="Legend">Key</button>
+  <div id="legend">
+    <div class="row"><span class="sev s5"></span><span class="sev s3"></span><span class="sev s1"></span> conflict severity</div>
+    <div class="row"><span class="sw st-escalating"></span> escalating <span class="sw st-active"></span> active <span class="sw st-de-escalating"></span> easing <span class="sw st-ceasefire"></span> ceasefire</div>
+    <div class="row"><span class="ramp"></span> GDELT conflict-event mentions</div>
+    <div class="row"><span class="line a"></span> side A <span class="line b"></span> side B <span class="line other"></span> mediator</div>
+    <div class="row"><span class="sw w-missile"></span> missile <span class="sw w-drone"></span> drone <span class="sw w-airstrike"></span> airstrike <span class="sw w-artillery"></span> shelling <span class="sw w-ground"></span> ground <span class="sw w-naval"></span> naval</div>
+    <div class="row"><span class="sw inc"></span> press-reported incident (GDELT, zoom in)</div>
+    <div class="row muted">impacts are city-level; ring = country-level only</div>
+  </div>
+  <div id="tooltip" hidden></div>
 </div>
-
-<div id="legend">
-  <div class="row"><span class="sev s5"></span><span class="sev s3"></span><span class="sev s1"></span> conflict severity</div>
-  <div class="row"><span class="sw st-escalating"></span> escalating <span class="sw st-active"></span> active <span class="sw st-de-escalating"></span> easing <span class="sw st-ceasefire"></span> ceasefire</div>
-  <div class="row"><span class="ramp"></span> GDELT conflict-event mentions</div>
-  <div class="row"><span class="line a"></span> side A <span class="line b"></span> side B <span class="line other"></span> mediator</div>
-  <div class="row"><span class="sw w-missile"></span> missile <span class="sw w-drone"></span> drone <span class="sw w-airstrike"></span> airstrike <span class="sw w-artillery"></span> shelling <span class="sw w-ground"></span> ground <span class="sw w-naval"></span> naval</div>
-  <div class="row"><span class="sw inc"></span> press-reported incident (GDELT, zoom in)</div>
-  <div class="row muted">impacts are city-level; ring = country-level only</div>
-</div>
-
-<div id="tooltip" hidden></div>
 
 <script src="/static/vendor/maplibre-gl.js"></script>
 <script src="/static/app.js"></script>
