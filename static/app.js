@@ -10,7 +10,6 @@ const LAND = "#3f4048", HEAT = "#f2a33a";
 let COUNTRIES = {};          // iso3 -> {iso3, iso2, name, lat, lon}
 let STATE = null;            // last /api/state
 let selected = null;         // conflict id
-let markers = [];
 const $ = (s) => document.querySelector(s);
 
 /* ---------- helpers ---------- */
@@ -51,6 +50,8 @@ function arc(from, to, n = 40) {
 
 /* ---------- map ---------- */
 const OCEAN = "#070b14";
+const HEAT_COLOR_EXPR = ["interpolate", ["linear"], ["coalesce", ["feature-state", "heat"], 0], 0, LAND, 1, HEAT];
+const HEAT_OPACITY_EXPR = ["+", 0.12, ["*", 0.6, ["coalesce", ["feature-state", "heat"], 0]]];
 const map = new maplibregl.Map({
   container: "map",
   style: {
@@ -91,19 +92,8 @@ map.on("load", async () => {
   map.addLayer({
     id: "country-fill", type: "fill", source: "countries",
     paint: {
-      "fill-color": [
-        "case",
-        ["==", ["feature-state", "side"], "A"], SIDE_COLOR.A,
-        ["==", ["feature-state", "side"], "B"], SIDE_COLOR.B,
-        ["==", ["feature-state", "side"], "other"], SIDE_COLOR.other,
-        ["interpolate", ["linear"], ["coalesce", ["feature-state", "heat"], 0], 0, LAND, 1, HEAT],
-      ],
-      "fill-opacity": [
-        "case",
-        ["boolean", ["feature-state", "involved"], false], 0.5,
-        ["+", 0.12, ["*", 0.6, ["coalesce", ["feature-state", "heat"], 0]]],
-      ],
-      "fill-opacity-transition": { duration: 300 },
+      "fill-color": HEAT_COLOR_EXPR, "fill-opacity": HEAT_OPACITY_EXPR,
+      "fill-color-transition": { duration: 650 }, "fill-opacity-transition": { duration: 650 },
     },
   });
   map.addLayer({ id: "lakes", type: "fill", source: "lakes", paint: { "fill-color": "#0c1424", "fill-opacity": 0.9 } });
@@ -131,10 +121,8 @@ map.on("load", async () => {
   });
   map.addLayer({
     id: "country-involved", type: "line", source: "countries",
-    paint: {
-      "line-color": ["match", ["feature-state", "side"], "A", SIDE_COLOR.A, "B", SIDE_COLOR.B, SIDE_COLOR.other],
-      "line-width": 1.8, "line-opacity": ["case", ["boolean", ["feature-state", "involved"], false], 1, 0],
-    },
+    paint: { "line-color": SIDE_COLOR.other, "line-width": 1.8, "line-opacity": 0,
+             "line-color-transition": { duration: 650 }, "line-opacity-transition": { duration: 650 } },
   });
   map.addLayer({
     id: "heat", type: "heatmap", source: "points", maxzoom: 9,
@@ -150,7 +138,7 @@ map.on("load", async () => {
   // focus mode: darkens everything not involved in the selected conflict
   map.addLayer({
     id: "country-dim", type: "fill", source: "countries",
-    paint: { "fill-color": "#04050a", "fill-opacity": 0, "fill-opacity-transition": { duration: 450 } },
+    paint: { "fill-color": "#04050a", "fill-opacity": 0, "fill-opacity-transition": { duration: 650 } },
   });
   map.addLayer({
     id: "garcs", type: "line", source: "garcs", layout: { visibility: "none" },
@@ -161,7 +149,7 @@ map.on("load", async () => {
     paint: {
       "line-color": ["get", "color"],
       "line-width": ["case", ["get", "combat"], 2.2, 1.4],
-      "line-opacity": ["case", ["get", "dim"], 0.15, 0.85],
+      "line-opacity": 0.85, "line-opacity-transition": { duration: 650 },
       "line-dasharray": [2, 1.5],
     },
   });
@@ -205,7 +193,7 @@ map.on("load", async () => {
     map.addSource(id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
     id: "strike-paths", type: "line", source: "strike-paths",
-    paint: { "line-color": ["get", "color"], "line-width": 1, "line-opacity": ["case", ["get", "dim"], 0.08, 0.3] },
+    paint: { "line-color": ["get", "color"], "line-width": 1, "line-opacity": 0.3, "line-opacity-transition": { duration: 650 } },
   }, "capital-dots");
   map.addLayer({
     id: "flashes", type: "circle", source: "flashes",
@@ -219,13 +207,14 @@ map.on("load", async () => {
   map.addLayer({
     id: "strike-impacts", type: "circle", source: "strike-impacts",
     paint: {
-      "circle-radius": ["case", ["==", ["get", "precision"], "country"],
-        ["interpolate", ["linear"], ["zoom"], 1, 10, 6, 16],
-        ["interpolate", ["linear"], ["zoom"], 1, ["get", "r"], 6, ["*", 2.2, ["get", "r"]]]],
+      "circle-radius": ["interpolate", ["linear"], ["zoom"],
+        1, ["case", ["==", ["get", "precision"], "country"], 10, ["get", "r"]],
+        6, ["case", ["==", ["get", "precision"], "country"], 16, ["*", 2.2, ["get", "r"]]]],
       "circle-color": ["get", "color"],
-      "circle-opacity": ["case", ["get", "dim"], 0.15, ["case", ["==", ["get", "precision"], "country"], 0.08, 0.55]],
+      "circle-opacity": ["case", ["==", ["get", "precision"], "country"], 0.08, 0.55],
       "circle-stroke-color": ["get", "color"], "circle-stroke-width": 1.2,
-      "circle-stroke-opacity": ["case", ["get", "dim"], 0.15, 0.9],
+      "circle-stroke-opacity": 0.9,
+      "circle-opacity-transition": { duration: 650 }, "circle-stroke-opacity-transition": { duration: 650 },
     },
   }, "capital-dots");
   map.addLayer({
@@ -347,29 +336,39 @@ function renderHeat() {
   });
 }
 
+const markerById = new Map();
 function renderMarkers() {
-  markers.forEach(m => m.remove()); markers = [];
+  const live = new Set();
   for (const c of STATE.conflicts) {
     const ep = c.epicenter; if (!ep || typeof ep.lat !== "number") continue;
-    const el = document.createElement("div");
+    live.add(c.id);
+    let m = markerById.get(c.id);
+    if (!m) {
+      const el = document.createElement("div");
+      el.className = "mk";
+      const lbl = document.createElement("span"); lbl.className = "mk-label"; el.appendChild(lbl);
+      el.addEventListener("click", (e) => { e.stopPropagation(); select(c.id); });
+      m = new maplibregl.Marker({ element: el }).setLngLat([ep.lon, ep.lat]).addTo(map);
+      markerById.set(c.id, m);
+    }
+    const el = m.getElement();
     const size = 8 + (c.severity || 1) * 3;
-    el.className = "mk" + (selected && selected !== c.id ? " dim" : "") + (selected === c.id ? " selected" : "");
     el.style.width = el.style.height = size + "px";
-    el.style.background = STATUS_COLOR[c.status] || STATUS_COLOR.active;
-    el.style.color = STATUS_COLOR[c.status] || STATUS_COLOR.active;
+    el.style.background = el.style.color = STATUS_COLOR[c.status] || STATUS_COLOR.active;
     el.title = c.name;
-    const lbl = document.createElement("span"); lbl.className = "mk-label"; lbl.textContent = c.name; lbl.style.left = (size + 2) + "px";
-    el.appendChild(lbl);
-    el.addEventListener("click", (e) => { e.stopPropagation(); select(c.id); });
-    markers.push(new maplibregl.Marker({ element: el }).setLngLat([ep.lon, ep.lat]).addTo(map));
+    el.querySelector(".mk-label").textContent = c.name;
+    el.querySelector(".mk-label").style.left = (size + 2) + "px";
+    el.classList.toggle("dim", !!(selected && selected !== c.id));
+    el.classList.toggle("selected", selected === c.id);
+    m.setLngLat([ep.lon, ep.lat]);
   }
+  for (const [id, m] of markerById) if (!live.has(id)) { m.remove(); markerById.delete(id); }
 }
 
 function renderArcs() {
   const feats = [];
   for (const c of STATE.conflicts) {
     const ep = c.epicenter; if (!ep) continue;
-    const dim = !!(selected && selected !== c.id);
     for (const p of c.parties) {
       const iso = norm(p.country); if (!iso) continue;
       const cc = COUNTRIES[iso];
@@ -379,7 +378,7 @@ function renderArcs() {
       if (p.role === "combatant" && dist < 12) continue;
       feats.push({
         type: "Feature", geometry: { type: "LineString", coordinates: arc(from, to) },
-        properties: { color: SIDE_COLOR[p.side] || SIDE_COLOR.other, combat: p.role === "combatant", dim, conflict: c.id },
+        properties: { color: SIDE_COLOR[p.side] || SIDE_COLOR.other, combat: p.role === "combatant", conflict: c.id },
       });
     }
   }
@@ -397,18 +396,30 @@ function renderGdeltArcs() {
 }
 
 function applyInvolvement() {
-  for (const iso of Object.keys(COUNTRIES)) map.setFeatureState({ source: "countries", id: iso }, { side: null, involved: false });
   const c = STATE.conflicts.find(x => x.id === selected);
-  if (c) for (const p of c.parties) {
-    const iso = norm(p.country); if (!iso) continue;
-    map.setFeatureState({ source: "countries", id: iso }, { side: p.side || "other", involved: true });
-  }
+  const sides = {};                                  // iso -> side
+  if (c) for (const p of c.parties) { const iso = norm(p.country); if (iso && !sides[iso]) sides[iso] = p.side || "other"; }
+  const isos = Object.keys(sides);
+  const inList = ["in", ["get", "ADM0_A3"], ["literal", isos]];
+  const sideColor = isos.length
+    ? ["match", ["get", "ADM0_A3"], ...isos.flatMap(i => [i, SIDE_COLOR[sides[i]] || SIDE_COLOR.other]), SIDE_COLOR.other]
+    : SIDE_COLOR.other;
+  // every change goes through setPaintProperty so MapLibre cross-fades old and new values per feature
+  map.setPaintProperty("country-fill", "fill-color", isos.length ? ["case", inList, sideColor, HEAT_COLOR_EXPR] : HEAT_COLOR_EXPR);
+  map.setPaintProperty("country-fill", "fill-opacity", isos.length ? ["case", inList, 0.5, HEAT_OPACITY_EXPR] : HEAT_OPACITY_EXPR);
+  map.setPaintProperty("country-involved", "line-color", sideColor);
+  map.setPaintProperty("country-involved", "line-opacity", isos.length ? ["case", inList, 1, 0] : 0);
+  map.setPaintProperty("country-dim", "fill-opacity", c ? ["case", inList, 0, 0.78] : 0);
+  // arcs and strikes of other conflicts fade instead of snapping
+  const own = (full, dimmed) => c ? ["case", ["==", ["get", "conflict"], c.id], full, dimmed] : full;
+  map.setPaintProperty("arcs", "line-opacity", own(0.85, 0.12));
+  map.setPaintProperty("strike-paths", "line-opacity", own(0.3, 0.06));
+  map.setPaintProperty("strike-impacts", "circle-opacity", own(["case", ["==", ["get", "precision"], "country"], 0.08, 0.55], 0.1));
+  map.setPaintProperty("strike-impacts", "circle-stroke-opacity", own(0.9, 0.12));
   setFocus(!!c);
 }
 
 function setFocus(on) {
-  map.setPaintProperty("country-dim", "fill-opacity",
-    on ? ["case", ["boolean", ["feature-state", "involved"], false], 0, 0.78] : 0);
   map.setPaintProperty("bg", "background-color", on ? "#03040a" : OCEAN);
   map.setPaintProperty("relief", "raster-opacity", on ? 0.45 : 1);
   map.setPaintProperty("heat", "heatmap-opacity", on ? 0.25 : 0.7);
@@ -423,8 +434,9 @@ const conflictsFor = (iso) => STATE.conflicts.filter(c => c.parties.some(p => no
 /* ---------- panel ---------- */
 function sevbar(n) { return `<span class="sevbar">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= n ? "on" : ""}"></i>`).join("")}</span>`; }
 
+function reveal(el) { el.classList.remove("reveal"); void el.offsetWidth; el.classList.add("reveal"); }
 function renderList() {
-  $("#detail").hidden = true; $("#list").hidden = false;
+  $("#detail").hidden = true; $("#list").hidden = false; reveal($("#list"));
   if (!STATE.conflicts.length) {
     $("#list").innerHTML = `<div class="empty">No conflicts extracted yet.<br><br>${STATE.meta.busy ? "The first refresh is running — the local model is reading the news feeds now." : "Press Refresh to fetch the feeds and run extraction."}</div>`;
     return;
@@ -443,7 +455,7 @@ function renderList() {
 
 function renderDetail() {
   const c = STATE.conflicts.find(x => x.id === selected); if (!c) return renderList();
-  $("#list").hidden = true; const d = $("#detail"); d.hidden = false;
+  $("#list").hidden = true; const d = $("#detail"); d.hidden = false; reveal(d);
   const bySide = { A: [], B: [], other: [] };
   for (const p of c.parties) (bySide[p.side] || bySide.other).push(p);
   const party = (p) => {
@@ -482,7 +494,7 @@ function renderDetail() {
 function select(id) {
   selected = id;
   const c = STATE.conflicts.find(x => x.id === id);
-  if (c && c.epicenter) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
+  if (c && c.epicenter) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.55, curve: 1.3, essential: true });
   renderMarkers(); renderArcs(); applyInvolvement(); renderStrikes();
   if (c) renderDetail(); else renderList();
 }
@@ -521,15 +533,15 @@ function renderStrikes() {
   const paths = [], impacts = [], items = [];
   list.forEach((st, i) => {
     const color = WEAPON_COLOR[st.weapon] || WEAPON_COLOR.other;
-    const dim = !!(selected && selected !== st.conflict_id);
+    const dim = !!(selected && selected !== st.conflict_id);   // projectiles of other conflicts stay hidden
     const to = [st.target_lon, st.target_lat];
     const r = 3 + Math.min(6, Math.log2(1 + (st.launched || 1)));
     impacts.push({ type: "Feature", geometry: { type: "Point", coordinates: to },
-      properties: { ...st, color, dim, r, precision: st.target_precision } });
+      properties: { ...st, color, r, precision: st.target_precision, conflict: st.conflict_id } });
     let path = null;
     if (st.origin_lat != null && st.origin_precision !== "country" || (st.origin_lat != null && st.target_precision !== "country")) {
       path = trajectory([st.origin_lon, st.origin_lat], to);
-      paths.push({ type: "Feature", geometry: { type: "LineString", coordinates: path }, properties: { color, dim } });
+      paths.push({ type: "Feature", geometry: { type: "LineString", coordinates: path }, properties: { color, conflict: st.conflict_id } });
     }
     items.push({ id: st.id, path, to, color, dim, phase: (i * 0.73) % 1 });
   });
