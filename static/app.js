@@ -6,6 +6,28 @@ const STATUS_COLOR = {
 const SIDE_COLOR = { A: "#3987e5", B: "#d95926", other: "#9085e9" };
 const WEAPON_COLOR = { missile: "#ffffff", drone: "#eda100", airstrike: "#e87ba4", artillery: "#c3c2b7", shelling: "#c3c2b7",
                        ground: "#e34948", bombing: "#f2a33a", naval: "#1baf7a", other: "#9085e9" };
+/* weapon glyphs on a 24x24 grid, nose up; each entry is a list of filled SVG subpaths.
+   `dir` glyphs are rotated along their flight path while in the air. */
+const WEAPON_GLYPH = {
+  missile:   { dir: true, d: ["M12 1L14.3 5.5V15.5L18 19.5V22L14.3 20.3L13.2 22H10.8L9.7 20.3L6 22V19.5L9.7 15.5V5.5Z"] },
+  drone:     { d: ["M2 5a3.2 3.2 0 1 0 6.4 0a3.2 3.2 0 1 0 -6.4 0Z", "M15.6 5a3.2 3.2 0 1 0 6.4 0a3.2 3.2 0 1 0 -6.4 0Z",
+                   "M2 19a3.2 3.2 0 1 0 6.4 0a3.2 3.2 0 1 0 -6.4 0Z", "M15.6 19a3.2 3.2 0 1 0 6.4 0a3.2 3.2 0 1 0 -6.4 0Z",
+                   "M4 5.6L5.6 4L20 18.4L18.4 20Z", "M18.4 4L20 5.6L5.6 20L4 18.4Z", "M8.6 8.6H15.4V15.4H8.6Z"] },
+  airstrike: { dir: true, d: ["M12 1L13.4 5.5V9.5L22 16.5V18.5L13.4 15.5V18.5L16.5 21V22.8L12 21.6L7.5 22.8V21L10.6 18.5V15.5L2 18.5V16.5L10.6 9.5V5.5Z"] },
+  artillery: { dir: true, d: ["M12 1.5C14.6 4 15.8 7 15.8 10.5V18.5H8.2V10.5C8.2 7 9.4 4 12 1.5Z", "M7.6 19.5H16.4V22.5H7.6Z"] },
+  bombing:   { dir: true, d: ["M12 22C9.3 20.2 8.3 17.5 8.3 14.5V9.5L12 7.5L15.7 9.5V14.5C15.7 17.5 14.7 20.2 12 22Z",
+                              "M11.2 2H12.8V8H11.2Z", "M8 1.5H16L12 6.5Z"] },
+  ground:    { d: ["M1.5 14H22.5L20 20.5H4Z", "M6.5 9H15L16.5 13.2H5.5Z", "M14.5 10.2H23V11.8H14.5Z"] },
+  naval:     { d: ["M1 14.5H23L19.5 20.5H4.5Z", "M7.5 9.5H16V13.7H7.5Z", "M10.3 4H12.2V9H10.3Z", "M12.2 6.2H15.8V7.6H12.2Z"] },
+  other:     { d: ["M12 1.5L14 8.2L20.5 5L16.6 11L22.5 13.5L15.8 14.8L17.5 21.5L12 17L6.5 21.5L8.2 14.8L1.5 13.5L7.4 11L3.5 5L10 8.2Z"] },
+};
+WEAPON_GLYPH.shelling = WEAPON_GLYPH.artillery;
+const weaponKey = (w) => WEAPON_GLYPH[w] ? w : "other";
+function weaponSvg(w, size = 14) {
+  const g = WEAPON_GLYPH[weaponKey(w)], c = WEAPON_COLOR[w] || WEAPON_COLOR.other;
+  return `<svg class="wi" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true">` +
+    g.d.map(d => `<path d="${d}" fill="${c}" stroke="rgba(0,0,0,.85)" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/>`).join("") + `</svg>`;
+}
 const LAND = "#3f4048", HEAT = "#f2a33a";
 
 let COUNTRIES = {};          // iso3 -> {iso3, iso2, name, lat, lon}
@@ -240,32 +262,46 @@ map.on("load", async () => {
       "circle-blur": 0.4,
     },
   }, "capital-dots");
+  for (const w of Object.keys(WEAPON_GLYPH)) map.addImage("w-" + w, weaponIcon(w), { pixelRatio: 2 });
+  // a soft halo sized by volume (a ring when only the country is known), with the weapon icon on top
   map.addLayer({
     id: "strike-impacts", type: "circle", source: "strike-impacts",
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"],
-        1, ["case", ["==", ["get", "precision"], "country"], 10, ["get", "r"]],
-        6, ["case", ["==", ["get", "precision"], "country"], 16, ["*", 2.2, ["get", "r"]]]],
+        1, ["case", ["==", ["get", "precision"], "country"], 10, ["+", 2, ["get", "r"]]],
+        6, ["case", ["==", ["get", "precision"], "country"], 16, ["*", 2.4, ["get", "r"]]]],
       "circle-color": ["get", "color"],
-      "circle-opacity": ["case", ["==", ["get", "precision"], "country"], 0.08, 0.55],
+      "circle-opacity": ["case", ["==", ["get", "precision"], "country"], 0.08, 0.2],
       "circle-stroke-color": ["get", "color"], "circle-stroke-width": 1.2,
-      "circle-stroke-opacity": 0.9,
+      "circle-stroke-opacity": ["case", ["==", ["get", "precision"], "country"], 0.9, 0],
       "circle-opacity-transition": { duration: 650 }, "circle-stroke-opacity-transition": { duration: 650 },
     },
   }, "capital-dots");
   map.addLayer({
-    id: "projectiles", type: "circle", source: "projectiles",
-    paint: { "circle-radius": 3, "circle-color": ["get", "color"], "circle-blur": 0.2,
-             "circle-stroke-color": "rgba(0,0,0,0.6)", "circle-stroke-width": 1 },
+    id: "strike-icons", type: "symbol", source: "strike-impacts",
+    layout: {
+      "icon-image": ["concat", "w-", ["get", "icon"]],
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 1, ["+", 0.45, ["*", 0.04, ["get", "r"]]], 6, ["+", 0.7, ["*", 0.06, ["get", "r"]]]],
+      "icon-allow-overlap": true, "icon-ignore-placement": true,
+    },
+    paint: { "icon-opacity": ["case", ["==", ["get", "precision"], "country"], 0.6, 1], "icon-opacity-transition": { duration: 650 } },
+  }, "capital-dots");
+  map.addLayer({
+    id: "projectiles", type: "symbol", source: "projectiles",
+    layout: {
+      "icon-image": ["concat", "w-", ["get", "icon"]], "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.6, 6, 0.85],
+      "icon-rotate": ["get", "rot"], "icon-rotation-alignment": "map",
+      "icon-allow-overlap": true, "icon-ignore-placement": true,
+    },
   });
-  map.on("mousemove", "strike-impacts", (e) => {
+  map.on("mousemove", ["strike-icons", "strike-impacts"], (e) => {
     const p = e.features[0].properties; const tip = $("#tooltip");
     tip.innerHTML = strikeHtml(p);
     tip.hidden = false; tip.style.left = (e.point.x + 14) + "px"; tip.style.top = (e.point.y + 14) + "px";
     map.getCanvas().style.cursor = "pointer";
   });
-  map.on("mouseleave", "strike-impacts", () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
-  map.on("click", "strike-impacts", (e) => {
+  map.on("mouseleave", ["strike-icons", "strike-impacts"], () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
+  map.on("click", ["strike-icons", "strike-impacts"], (e) => {
     e.originalEvent._handled = true;
     openStrikeFeature(e.features[0], e.lngLat);
   });
@@ -530,8 +566,10 @@ function applyInvolvement() {
   const own = (full, dimmed) => c ? ["case", ["==", ["get", "conflict"], c.id], full, dimmed] : full;
   map.setPaintProperty("arcs", "line-opacity", own(0.85, 0.12));
   map.setPaintProperty("strike-paths", "line-opacity", own(0.3, 0.06));
-  map.setPaintProperty("strike-impacts", "circle-opacity", own(["case", ["==", ["get", "precision"], "country"], 0.08, 0.55], 0.1));
-  map.setPaintProperty("strike-impacts", "circle-stroke-opacity", own(0.9, 0.12));
+  const isCountry = ["==", ["get", "precision"], "country"];
+  map.setPaintProperty("strike-impacts", "circle-opacity", own(["case", isCountry, 0.08, 0.2], 0.04));
+  map.setPaintProperty("strike-impacts", "circle-stroke-opacity", own(["case", isCountry, 0.9, 0], ["case", isCountry, 0.12, 0]));
+  map.setPaintProperty("strike-icons", "icon-opacity", own(["case", isCountry, 0.6, 1], 0.15));
   setFocus(!!c);
   if (map.getLayer("incidents")) applyIncidentFocus();
 }
@@ -596,7 +634,7 @@ function renderDetail() {
     ${(c.developments || []).map(x => `<div class="dev" data-url="${esc((x.sources || [])[0] || "")}"><span class="date">${esc(x.date)}</span><span>${esc(x.text)}${(x.sources || []).map(u => ` <a href="${esc(u)}" target="_blank" title="open original">↗</a>`).join("")}</span></div>`).join("")}
     <h3>Reported attacks (7 days)</h3>
     ${conflictStrikes(c.id).map(st => `<div class="strike" data-id="${st.id}">
-      <span class="date">${esc(st.date.slice(5).replace("-", "/"))}</span><span class="w" style="background:${WEAPON_COLOR[st.weapon] || WEAPON_COLOR.other}"></span>
+      <span class="date">${esc(st.date.slice(5).replace("-", "/"))}</span><span class="w">${weaponSvg(st.weapon)}</span>
       <span class="body"><span class="route">${(st.attacker && st.attacker !== "unknown") ? esc(st.attacker) + " → " : st.origin_name ? esc(st.origin_name) + " → " : ""}${esc(st.target_name)}</span><span class="prec">${esc(st.target_precision)}</span><br>
       <span class="meta">${esc(st.weapon)}${st.launched != null ? ` · ${st.launched} launched` : ""}${st.intercepted != null ? ` · ${st.intercepted} intercepted` : ""}${st.outcome ? ` · ${esc(st.outcome)}` : ""}</span></span>
     </div>`).join("") || "<div class='empty'>none reported in the feeds</div>"}
@@ -701,6 +739,17 @@ function fuzzyTap(e) {
 const AIRCRAFT_COLOR = { tanker: "#5ec8e5", isr: "#c792ff", transport: "#e6e4da", combat: "#ff5a5a", heli: "#7ed67e", other: "#f0f3fa" };
 let AIR = null;             // last /api/aircraft
 /* top-down plane silhouette, nose up, drawn once as an SDF so the layer can tint it */
+/* weapon icon in its own colour with a dark outline baked in (48px canvas, shown at 24px) */
+function weaponIcon(w) {
+  const n = 48, c = document.createElement("canvas"); c.width = c.height = n;
+  const g = c.getContext("2d"), paths = WEAPON_GLYPH[w].d.map(d => new Path2D(d));
+  g.scale(1.6, 1.6); g.translate(3, 3);            // 24-unit glyph centred with room for the outline
+  g.lineJoin = "round"; g.lineWidth = 3; g.strokeStyle = "rgba(0,0,0,0.9)"; g.fillStyle = "rgba(0,0,0,0.9)";
+  for (const p of paths) { g.stroke(p); g.fill(p); }
+  g.fillStyle = WEAPON_COLOR[w] || WEAPON_COLOR.other;
+  for (const p of paths) g.fill(p);
+  return g.getImageData(0, 0, n, n);
+}
 function planeIcon(outline = false) {
   const n = 48, c = document.createElement("canvas"); c.width = c.height = n;
   const g = c.getContext("2d"); g.beginPath();
@@ -813,7 +862,7 @@ function renderStrikes() {
     const to = [st.target_lon, st.target_lat];
     const r = 3 + Math.min(6, Math.log2(1 + (st.launched || 1)));
     impacts.push({ type: "Feature", geometry: { type: "Point", coordinates: to },
-      properties: { ...st, color, r, precision: st.target_precision, conflict: st.conflict_id } });
+      properties: { ...st, color, r, icon: weaponKey(st.weapon), precision: st.target_precision, conflict: st.conflict_id } });
     let path = null;
     const crossBorder = st.origin_country && st.target_country && st.origin_country !== st.target_country;
     const usableOrigin = st.origin_lat != null && (st.origin_precision !== "country" || crossBorder);
@@ -821,7 +870,7 @@ function renderStrikes() {
       path = trajectory([st.origin_lon, st.origin_lat], to);
       paths.push({ type: "Feature", geometry: { type: "LineString", coordinates: path }, properties: { color, conflict: st.conflict_id } });
     }
-    items.push({ id: st.id, path, to, color, dim, phase: (i * 0.73) % 1 });
+    items.push({ id: st.id, path, to, color, icon: weaponKey(st.weapon), dir: !!WEAPON_GLYPH[weaponKey(st.weapon)].dir, dim, phase: (i * 0.73) % 1 });
   });
   map.getSource("strike-paths").setData({ type: "FeatureCollection", features: paths });
   map.getSource("strike-impacts").setData({ type: "FeatureCollection", features: impacts });
@@ -841,7 +890,9 @@ function tickStrikes() {
       if (it.path && t < 0.55) {
         const f = t / 0.55, k = f * (it.path.length - 1), i0 = Math.floor(k), i1 = Math.min(it.path.length - 1, i0 + 1), fr = k - i0;
         const p0 = it.path[i0], p1 = it.path[i1];
-        proj.push({ type: "Feature", geometry: { type: "Point", coordinates: [p0[0] + (p1[0] - p0[0]) * fr, p0[1] + (p1[1] - p0[1]) * fr] }, properties: { color: it.color } });
+        const lat = p0[1] + (p1[1] - p0[1]) * fr;
+        const rot = it.dir ? Math.atan2((p1[0] - p0[0]) * Math.cos(lat * Math.PI / 180), p1[1] - p0[1]) * 180 / Math.PI : 0;
+        proj.push({ type: "Feature", geometry: { type: "Point", coordinates: [p0[0] + (p1[0] - p0[0]) * fr, lat] }, properties: { icon: it.icon, rot } });
       } else if (t >= 0.55 && t < 0.85) {
         const f = (t - 0.55) / 0.3;
         flashes.push({ type: "Feature", geometry: { type: "Point", coordinates: it.to }, properties: { color: it.color, r: 0.2 + f, a: 1 - f } });
@@ -858,7 +909,7 @@ function tickStrikes() {
 }
 
 function setStrikeVisibility(on) {
-  for (const id of ["strike-paths", "strike-impacts", "projectiles", "flashes"]) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+  for (const id of ["strike-paths", "strike-impacts", "strike-icons", "projectiles", "flashes"]) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
 }
 
 /* ---------- day / night ---------- */
@@ -1024,3 +1075,6 @@ function sheetPadding() {
 }
 mobileMQ.addEventListener("change", () => { toggleMenu(false); toggleLegend(false); map.setPadding(sheetPadding()); });
 if (isMobile() && !sharedView) map.setPadding(sheetPadding());   // start with the globe above the sheet
+$("#weapon-legend").innerHTML = [["missile", "missile"], ["drone", "drone"], ["airstrike", "airstrike"], ["bombing", "bombing"],
+  ["artillery", "shelling"], ["ground", "ground"], ["naval", "naval"], ["other", "other"]]
+  .map(([w, label]) => `${weaponSvg(w, 13)} ${label}`).join(" ");

@@ -146,7 +146,8 @@ body.resizing #map { pointer-events: none; }
 .strike { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; line-height: 1.4; cursor: pointer; }
 .strike:hover { background: var(--surface-2); }
 .strike .date { flex: none; color: var(--muted); width: 44px; font-variant-numeric: tabular-nums; }
-.strike .w { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
+.strike .w { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+.wi { display: inline-block; vertical-align: middle; flex: none; }
 .strike .body { flex: 1; }
 .strike .route { font-weight: 500; }
 .strike .meta { color: var(--muted); }
