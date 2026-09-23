@@ -15,7 +15,8 @@ from collections import deque
 
 import httpx
 
-from .config import AIRCRAFT_DELAY_MIN, AIRCRAFT_POLL_SECONDS, AIRCRAFT_SOURCES, AIRCRAFT_TRAIL_MIN
+from .config import (AIRCRAFT_BACKOFF_SECONDS, AIRCRAFT_DELAY_MIN, AIRCRAFT_POLL_SECONDS, AIRCRAFT_SOURCES,
+                     AIRCRAFT_TRAIL_MIN)
 
 log = logging.getLogger("aircraft")
 UA = "conflict-map/0.1 (+https://github.com/Comm4nd0/conflict-map)"
@@ -99,20 +100,29 @@ class Tracker:
         self.lock = threading.Lock()
         self.source = None
         self.last_error = None
+        self.skip_until: dict[str, float] = {}
 
     def poll(self):
+        now = time.time()
         for name, url in AIRCRAFT_SOURCES:
+            if self.skip_until.get(name, 0) > now:
+                continue
             try:
                 r = httpx.get(url, timeout=20, headers={"User-Agent": UA})
                 r.raise_for_status()
-                now = time.time()
                 snap = parse(r.json())
-                self.add(now, snap)
+                self.add(time.time(), snap)
+                if self.source != name:
+                    log.info("aircraft source: %s", name)
                 self.source, self.last_error = name, None
+                self.skip_until.pop(name, None)
                 return len(snap)
             except (httpx.HTTPError, ValueError) as e:
+                code = getattr(getattr(e, "response", None), "status_code", None)
+                wait = AIRCRAFT_BACKOFF_SECONDS * (4 if code in (401, 403, 429) else 1)
+                self.skip_until[name] = now + wait
                 self.last_error = f"{name}: {e}"
-                log.warning("aircraft poll failed (%s): %s", name, e)
+                log.warning("aircraft source %s failed (%s); skipping it for %d min", name, code or e.__class__.__name__, wait // 60)
         return None
 
     def add(self, ts: float, snap: dict):

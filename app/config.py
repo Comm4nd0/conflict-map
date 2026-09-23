@@ -29,9 +29,12 @@ AIRCRAFT_DELAY_MIN = int(os.environ.get("AIRCRAFT_DELAY_MIN", "20"))
 AIRCRAFT_TRAIL_MIN = int(os.environ.get("AIRCRAFT_TRAIL_MIN", "30"))
 AIRCRAFT_POLL_SECONDS = int(os.environ.get("AIRCRAFT_POLL_SECONDS", "60"))
 AIRCRAFT_SOURCES = [   # tried in order; both speak the readsb JSON format
-    ("airplanes.live", "https://api.airplanes.live/v2/mil"),
+    # adsb.fi first: airplanes.live answers 403 to our home and Hetzner IPs (seen 2026-09-23)
     ("adsb.fi", "https://opendata.adsb.fi/api/v2/mil"),
+    ("airplanes.live", "https://api.airplanes.live/v2/mil"),
 ]
+# a source that fails is skipped for this long before it is tried again (403/429 back off longer)
+AIRCRAFT_BACKOFF_SECONDS = int(os.environ.get("AIRCRAFT_BACKOFF_SECONDS", "900"))
 
 FEEDS = {
     # wires / global
