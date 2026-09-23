@@ -296,24 +296,40 @@ map.on("load", async () => {
 
   // ---- military aircraft (public ADS-B, served with a delay)
   map.addImage("plane", planeIcon(), { sdf: true, pixelRatio: 2 });
+  map.addImage("plane-outline", planeIcon(true), { pixelRatio: 2 });
   map.addSource("aircraft", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addSource("aircraft-trails", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   const acColor = ["match", ["get", "cat"], ...Object.entries(AIRCRAFT_COLOR).flat(), AIRCRAFT_COLOR.other];
   map.addLayer({
+    id: "aircraft-trails-casing", type: "line", source: "aircraft-trails",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "rgba(0,0,0,0.55)", "line-width": 4 },
+  });
+  map.addLayer({
     id: "aircraft-trails", type: "line", source: "aircraft-trails",
-    paint: { "line-color": acColor, "line-width": 1.3, "line-opacity": 0.4 },
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": acColor, "line-width": 2, "line-opacity": 0.85 },
+  });
+  // a solid dark silhouette underneath gives every plane a crisp outline on any background
+  map.addLayer({
+    id: "aircraft-outline", type: "symbol", source: "aircraft",
+    layout: {
+      "icon-image": "plane-outline", "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.9, 6, 1.35],
+      "icon-rotate": ["coalesce", ["get", "track"], 0], "icon-rotation-alignment": "map",
+      "icon-allow-overlap": true, "icon-ignore-placement": true,
+    },
   });
   map.addLayer({
     id: "aircraft", type: "symbol", source: "aircraft",
     layout: {
-      "icon-image": "plane", "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.75, 6, 1],
+      "icon-image": "plane", "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.9, 6, 1.35],
       "icon-rotate": ["coalesce", ["get", "track"], 0], "icon-rotation-alignment": "map",
       "icon-allow-overlap": true, "icon-ignore-placement": true,
       "text-field": ["step", ["zoom"], "", 4, ["coalesce", ["get", "flight"], ""]],
       "text-font": ["Open Sans Regular"], "text-size": 10, "text-offset": [0, 1.3], "text-anchor": "top", "text-optional": true,
     },
-    paint: { "icon-color": acColor, "icon-halo-color": "rgba(0,0,0,0.7)", "icon-halo-width": 1,
-             "text-color": "#c3c2b7", "text-halo-color": "#000", "text-halo-width": 1 },
+    paint: { "icon-color": acColor,
+             "text-color": "#e6e4da", "text-halo-color": "#000", "text-halo-width": 1.4 },
   });
   map.on("mousemove", "aircraft", (e) => {
     const tip = $("#tooltip");
@@ -682,16 +698,19 @@ function fuzzyTap(e) {
 }
 
 /* ---------- military aircraft ---------- */
-const AIRCRAFT_COLOR = { tanker: "#5ec8e5", isr: "#c792ff", transport: "#e6e4da", combat: "#ff5a5a", heli: "#7ed67e", other: "#9aa4b5" };
+const AIRCRAFT_COLOR = { tanker: "#5ec8e5", isr: "#c792ff", transport: "#e6e4da", combat: "#ff5a5a", heli: "#7ed67e", other: "#f0f3fa" };
 let AIR = null;             // last /api/aircraft
 /* top-down plane silhouette, nose up, drawn once as an SDF so the layer can tint it */
-function planeIcon() {
+function planeIcon(outline = false) {
   const n = 48, c = document.createElement("canvas"); c.width = c.height = n;
-  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.beginPath();
+  const g = c.getContext("2d"); g.beginPath();
   const pts = [[24, 3], [27, 9], [27, 19], [44, 29], [44, 33], [27, 28], [26, 38], [32, 43], [32, 46], [24, 43.5],
                [16, 46], [16, 43], [22, 38], [21, 28], [4, 33], [4, 29], [21, 19], [21, 9]];
   pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y));
-  g.closePath(); g.fill();
+  g.closePath();
+  if (outline) { g.lineJoin = "round"; g.lineWidth = 6; g.strokeStyle = "rgba(0,0,0,0.9)"; g.stroke(); g.fillStyle = "rgba(0,0,0,0.9)"; }
+  else g.fillStyle = "#fff";
+  g.fill();
   return g.getImageData(0, 0, n, n);
 }
 async function loadAircraft() {
@@ -906,7 +925,7 @@ $("#tg-rotate").addEventListener("change", e => { autoRotate.on = e.target.check
 /* ---------- controls ---------- */
 $("#tg-strikes").addEventListener("change", e => setStrikeVisibility(e.target.checked));
 $("#tg-aircraft").addEventListener("change", e => {
-  for (const id of ["aircraft", "aircraft-trails"]) map.setLayoutProperty(id, "visibility", e.target.checked ? "visible" : "none");
+  for (const id of ["aircraft", "aircraft-outline", "aircraft-trails", "aircraft-trails-casing"]) map.setLayoutProperty(id, "visibility", e.target.checked ? "visible" : "none");
   if (e.target.checked) loadAircraft();
 });
 $("#tg-incidents").addEventListener("change", e => map.setLayoutProperty("incidents", "visibility", e.target.checked ? "visible" : "none"));

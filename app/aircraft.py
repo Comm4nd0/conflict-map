@@ -60,9 +60,36 @@ TYPES = {
 }
 
 
-def classify(t: str) -> tuple[str, str]:
+TYPES.update({
+    "C135": ("isr", "C-135 family"), "K35T": ("tanker", "KC-135T"), "E3": ("isr", "E-3 Sentry AWACS"),
+    "BE20": ("transport", "King Air 200 / C-12"), "BE9L": ("transport", "King Air 90"), "B190": ("transport", "Beech 1900"),
+    "DHC6": ("transport", "Twin Otter"), "M28": ("transport", "M28 Skytruck"), "A321": ("transport", "A321"),
+    "A320": ("transport", "A320"), "A319": ("transport", "A319"), "B737": ("transport", "737"), "B738": ("transport", "737-800"),
+    "GL5T": ("transport", "Global 5000"), "PC24": ("transport", "PC-24"), "C160": ("transport", "C-160 Transall"),
+    "EC35": ("heli", "H135"), "EC45": ("heli", "H145"), "H145": ("heli", "H145"), "A169": ("heli", "AW169"),
+    "A109": ("heli", "AW109"), "EC25": ("heli", "H225"), "AS3B": ("heli", "AS332 Super Puma"), "EC55": ("heli", "H155"),
+    "UH1": ("heli", "UH-1 Huey"), "UH1Y": ("heli", "UH-1Y Venom"), "H1": ("heli", "UH-1"), "AS65": ("heli", "Dauphin / MH-65"),
+    "MI24": ("heli", "Mi-24"), "KA52": ("heli", "Ka-52"), "TIGR": ("heli", "Tiger"), "S70": ("heli", "S-70 Black Hawk"),
+})
+# trainers and light aircraft are real military traffic but not interesting on a conflict map; keep them "other"
+TRAINERS = {"PC21": "PC-21 trainer", "PC7": "PC-7 trainer", "PC9": "PC-9 trainer", "G115": "Grob 115 trainer",
+            "G120": "Grob 120 trainer", "G12T": "Grob 120TP trainer", "KT1": "KT-1 trainer", "Z42": "Zlin 242 trainer",
+            "M339": "MB-339 trainer", "T6": "T-6 Texan II", "TEX2": "T-6 Texan II", "T45": "T-45 Goshawk", "SR22": "SR22"}
+
+
+def classify(t: str, desc: str = "") -> tuple[str, str]:
     t = (t or "").upper().strip()
-    return TYPES.get(t, ("other", t or "unknown type"))
+    if t in TYPES:
+        return TYPES[t]
+    if t in TRAINERS:
+        return ("other", TRAINERS[t])
+    d = (desc or "").upper()
+    for words, cat in ((("TANKER", "KC-"), "tanker"), (("HELICOPTER", "HAWK", "CHINOOK", "APACHE", "PUMA"), "heli"),
+                       (("HERCULES", "GLOBEMASTER", "TRANSPORT", "ATLAS"), "transport"),
+                       (("SENTRY", "RIVET", "POSEIDON", "ORION", "RECON", "SURVEILLANCE"), "isr")):
+        if any(w in d for w in words):
+            return (cat, desc.title())
+    return ("other", desc.title() if desc else (t or "unknown type"))
 
 
 def _num(v):
@@ -81,7 +108,7 @@ def parse(payload: dict) -> dict:
         hx = str(a.get("hex") or "").lower().lstrip("~")
         if not hx:
             continue
-        cat, name = classify(a.get("t"))
+        cat, name = classify(a.get("t"), a.get("desc") or "")
         out[hx] = {
             "hex": hx, "lat": round(lat, 4), "lon": round(lon, 4),
             "track": _num(a.get("track")) if _num(a.get("track")) is not None else _num(a.get("true_heading")),
