@@ -842,6 +842,7 @@ async function openArticle(url, opts = {}) {
   let a;
   try { a = await (await fetch(`/api/article?url=${encodeURIComponent(url)}`)).json(); }
   catch (_) { a = { ok: false, error: "could not reach the server" }; }
+  if (a && a.error && /too many/.test(a.error)) a.error = "you've opened a lot of articles in the last minute; wait a moment";
   if (seq !== readerSeq) return;           // another article was opened meanwhile
   const orig = `<a href="${esc(a.final_url || url)}" target="_blank">open original ↗</a>`;
   if (!a.ok) {

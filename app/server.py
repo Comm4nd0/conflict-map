@@ -1,11 +1,15 @@
 import asyncio
+import gzip
+import hashlib
+import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import aircraft, countries, ships, gdelt, pipeline, reader
@@ -63,8 +67,7 @@ def healthz():
     return {"ok": True, "conflicts": n, "serve_only": SERVE_ONLY}
 
 
-@app.get("/api/state")
-def state(hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
+def build_state(hours: int, strike_days: int) -> dict:
     since = (datetime.now(timezone.utc) - timedelta(days=strike_days)).strftime("%Y-%m-%d")
     with db() as con:
         conflicts = all_conflicts(con)
@@ -108,20 +111,91 @@ def state(hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
     for c in conflicts:
         c["activity"] = activity.get(c["id"], {"attacks_7d": 0, "attacks_prev_7d": 0})
     conflicts.sort(key=lambda c: (-(c.get("severity") or 0), -(c.get("last_seen") or 0)))
-    return JSONResponse({
+    return {
         "meta": meta,
         "conflicts": conflicts,
         "strikes": strikes,
         "gdelt": {"hours": agg["hours"], "total": agg["total"], "latest": agg["latest"],
                   "heat": heat, "points": agg["points"], "pairs": pairs, "incidents": incidents},
-    })
+    }
+
+
+# ---- /api/state is the same for every visitor until the data changes: build it once,
+# ---- keep a gzipped copy, and let browsers revalidate with an ETag (304, no body)
+_state_cache: dict = {}
+_state_lock = threading.Lock()
+STATE_MIN_AGE = 30          # seconds; in pipeline mode the db changes often, don't rebuild more than this
+
+
+def _db_version() -> float:
+    from .config import DB_PATH
+    v = 0.0
+    for suffix in ("", "-wal"):
+        try:
+            v = max(v, os.stat(str(DB_PATH) + suffix).st_mtime)
+        except OSError:
+            pass
+    return v
+
+
+def _cached_state(hours: int, strike_days: int) -> dict:
+    key = (hours, strike_days)
+    ver, now = _db_version(), time.time()
+    hit = _state_cache.get(key)
+    if hit and (hit["ver"] == ver or now - hit["built"] < STATE_MIN_AGE):
+        return hit
+    with _state_lock:                                   # one rebuild at a time; others reuse it
+        hit = _state_cache.get(key)
+        if hit and (hit["ver"] == ver or time.time() - hit["built"] < STATE_MIN_AGE):
+            return hit
+        body = json.dumps(build_state(hours, strike_days), separators=(",", ":"), ensure_ascii=False).encode()
+        entry = {"ver": ver, "built": time.time(), "body": body, "gz": gzip.compress(body, 6),
+                 "etag": '"' + hashlib.sha1(body).hexdigest()[:20] + '"'}
+        _state_cache[key] = entry
+        return entry
+
+
+@app.get("/api/state")
+def state(request: Request, hours: int = GDELT_WINDOW_HOURS, strike_days: int = 7):
+    hours = max(1, min(hours, 168))
+    strike_days = max(1, min(strike_days, 30))
+    e = _cached_state(hours, strike_days)
+    headers = {"ETag": e["etag"], "Cache-Control": "no-cache", "Vary": "Accept-Encoding"}
+    if request.headers.get("if-none-match") == e["etag"]:
+        return Response(status_code=304, headers=headers)
+    if "gzip" in request.headers.get("accept-encoding", ""):
+        return Response(e["gz"], media_type="application/json", headers={**headers, "Content-Encoding": "gzip"})
+    return Response(e["body"], media_type="application/json", headers=headers)
+
+
+_article_hits: dict[str, list[float]] = {}
+_article_sem = asyncio.Semaphore(4)
+ARTICLE_LIMIT = (20, 60)          # uncached article fetches per client per 60 s
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    return fwd.split(",")[0].strip() or (request.client.host if request.client else "?")
 
 
 @app.get("/api/article")
-async def article(url: str):
+async def article(request: Request, url: str):
     if len(url) > 2000:
         return JSONResponse({"ok": False, "error": "bad url"}, status_code=400)
-    return await asyncio.to_thread(reader.fetch, url)
+    if reader.cached(url):
+        return reader.fetch(url)
+    ip, now = _client_ip(request), time.time()
+    hits = [t for t in _article_hits.get(ip, []) if now - t < ARTICLE_LIMIT[1]]
+    if len(hits) >= ARTICLE_LIMIT[0]:
+        return JSONResponse({"ok": False, "error": "too many articles opened in a minute, try again shortly"},
+                            status_code=429, headers={"Retry-After": "30"})
+    hits.append(now)
+    _article_hits[ip] = hits
+    if len(_article_hits) > 5000:                       # forget idle clients
+        for k in [k for k, v in _article_hits.items() if now - v[-1] > 120]:
+            _article_hits.pop(k, None)
+    async with _article_sem:
+        return await asyncio.to_thread(reader.fetch, url)
 
 
 @app.get("/api/aircraft")

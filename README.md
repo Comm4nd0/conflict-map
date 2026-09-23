@@ -69,6 +69,17 @@ uv run --with pillow --with numpy python scripts/build_tiles.py /tmp/gray/GRAY_5
 
 ## Run
 
+As a service on the home machine (restarts on crash and at boot):
+
+```bash
+cp deploy/conflict-map.service ~/.config/systemd/user/   # once
+systemctl --user enable --now conflict-map
+loginctl enable-linger $USER                            # keep running when logged out
+journalctl --user -u conflict-map; tail -f data/server.log
+```
+
+By hand:
+
 ```bash
 uv sync
 uv run uvicorn app.server:app --host 127.0.0.1 --port 8765

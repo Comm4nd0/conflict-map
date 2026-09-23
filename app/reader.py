@@ -67,6 +67,12 @@ def _feed_fallback(url: str, result: dict) -> dict:
             "note": f"Full text unavailable ({result.get('error', 'blocked')}); showing the feed summary."}
 
 
+def cached(url: str) -> bool:
+    with _lock:
+        hit = _cache.get(url)
+        return bool(hit and time.time() - hit[0] < CACHE_TTL)
+
+
 def fetch(url: str) -> dict:
     with _lock:
         hit = _cache.get(url)

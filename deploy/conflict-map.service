@@ -1,0 +1,17 @@
+[Unit]
+Description=Conflict Map pipeline (feeds + GDELT + local LLM extraction every 30 min, pushes DB to Luma001) and local viewer on :8765
+After=network-online.target llama-swap.service
+Wants=network-online.target llama-swap.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Code/conflict-map
+ExecStart=%h/Code/conflict-map/run.sh
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=30
+StandardOutput=append:%h/Code/conflict-map/data/server.log
+StandardError=append:%h/Code/conflict-map/data/server.log
+
+[Install]
+WantedBy=default.target
