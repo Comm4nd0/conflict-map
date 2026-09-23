@@ -115,6 +115,15 @@ Deploy an update: `ssh luma 'cd /root/conflict-map && git pull --ff-only && dock
 - Conflicts are never deleted automatically. `last_seen` is stored; stale ones can be
   filtered in the UI later.
 
+## Military ships layer
+
+Naval vessels from AIS via aisstream.io, limited to watched seas (`SHIPS_BOXES` in
+`app/config.py`) and held back 20 minutes like aircraft. It needs a free API key from
+https://aisstream.io; without one the layer shows "(off)". On the server put it in
+`/root/conflict-map/.env` as `AISSTREAM_API_KEY=...` and run `docker compose up -d`.
+Most warships switch AIS off; auxiliaries (USNS, RFA), patrol and coast-guard vessels
+are what usually shows up.
+
 ## Contributing
 
 Issues and pull requests are welcome: https://github.com/Comm4nd0/conflict-map

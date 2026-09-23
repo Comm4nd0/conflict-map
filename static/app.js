@@ -401,6 +401,35 @@ map.on("load", async () => {
     openAircraftFeature(e.features[0]);
   });
 
+  // ---- military ships (AIS, served with a delay)
+  map.addImage("ship", shipIcon(), { sdf: true, pixelRatio: 2 });
+  map.addImage("ship-outline", shipIcon(true), { pixelRatio: 2 });
+  map.addSource("ships", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addSource("ship-trails", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "ship-trails", type: "line", source: "ship-trails", layout: { visibility: "none", "line-cap": "round" },
+    paint: { "line-color": SHIP_COLOR, "line-width": 1.6, "line-opacity": 0.6, "line-dasharray": [1, 1.5] } });
+  const shipLayout = (img) => ({ visibility: "none", "icon-image": img,
+    "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.8, 6, 1.25],
+    "icon-rotate": ["coalesce", ["get", "heading"], 0], "icon-rotation-alignment": "map",
+    "icon-allow-overlap": true, "icon-ignore-placement": true });
+  map.addLayer({ id: "ships-outline", type: "symbol", source: "ships", layout: shipLayout("ship-outline") });
+  map.addLayer({ id: "ships", type: "symbol", source: "ships",
+    layout: { ...shipLayout("ship"), "text-field": ["step", ["zoom"], "", 4, ["get", "name"]], "text-font": ["Open Sans Regular"],
+              "text-size": 10, "text-offset": [0, 1.4], "text-anchor": "top", "text-optional": true },
+    paint: { "icon-color": SHIP_COLOR, "text-color": "#cfe9ff", "text-halo-color": "#000", "text-halo-width": 1.4 } });
+  map.on("mousemove", "ships", (e) => {
+    const tip = $("#tooltip"); tip.innerHTML = shipHtml(e.features[0].properties, false);
+    tip.hidden = false; tip.style.left = (e.point.x + 14) + "px"; tip.style.top = (e.point.y + 14) + "px";
+    map.getCanvas().style.cursor = "pointer";
+  });
+  map.on("mouseleave", "ships", () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
+  map.on("click", "ships", (e) => {
+    e.originalEvent._handled = true;
+    const f = e.features[0];
+    new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(f.geometry.coordinates).setHTML(shipHtml(f.properties)).addTo(map);
+  });
+  setInterval(loadShips, 60000);
+
   // hover outline
   map.on("mousemove", "country-fill", (e) => {
     const iso = e.features[0].properties.ADM0_A3;
@@ -760,6 +789,42 @@ function fuzzyTap(e) {
   return true;
 }
 
+/* ---------- military ships ---------- */
+const SHIP_COLOR = "#8fd3ff";
+let SHIPS = null;
+/* top-down hull, bow up */
+function shipIcon(outline = false) {
+  const n = 48, c = document.createElement("canvas"); c.width = c.height = n;
+  const g = c.getContext("2d"); g.beginPath();
+  [[24, 3], [31, 14], [31, 41], [24, 45], [17, 41], [17, 14]].forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y));
+  g.closePath();
+  if (outline) { g.lineJoin = "round"; g.lineWidth = 6; g.strokeStyle = "rgba(0,0,0,0.9)"; g.stroke(); g.fillStyle = "rgba(0,0,0,0.9)"; g.fill(); }
+  else { g.fillStyle = "#fff"; g.fill(); g.globalCompositeOperation = "destination-out"; g.fillRect(21, 20, 6, 9); }   // superstructure cut-out
+  return g.getImageData(0, 0, n, n);
+}
+async function loadShips() {
+  if (!$("#tg-ships").checked || document.hidden) return;
+  try { SHIPS = await (await fetch("/api/ships")).json(); } catch (_) { return; }
+  const list = SHIPS.ships || [];
+  map.getSource("ships").setData({ type: "FeatureCollection", features: list.map(v => ({
+    type: "Feature", geometry: { type: "Point", coordinates: [v.lon, v.lat] }, properties: { ...v, trail: undefined } })) });
+  map.getSource("ship-trails").setData({ type: "FeatureCollection", features: list.filter(v => v.trail.length > 1).map(v => ({
+    type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: v.trail } })) });
+  const lbl = $("#ships-count");
+  lbl.textContent = SHIPS.enabled ? `(${list.length})` : "(off)";
+  lbl.parentElement.title = SHIPS.enabled
+    ? `Naval vessels broadcasting AIS in watched seas, ${SHIPS.delay_min}-min delay. Most warships switch AIS off; auxiliaries and patrol vessels are the usual catch.`
+    : "Ship layer needs an aisstream.io API key on the server";
+}
+function shipHtml(p, full = true) {
+  const kn = p.sog != null && p.sog !== "" ? `${(+p.sog).toFixed(1)} kn` : "";
+  const when = p.seen ? new Date(p.seen * 1000).toISOString().slice(11, 16) + " UTC" : "";
+  let h = `<b>${esc(p.name)}</b>${p.callsign ? ` · ${esc(p.callsign)}` : ""}<br>${[kn, p.dest ? "→ " + esc(p.dest) : ""].filter(Boolean).join(" · ")}`;
+  if (full) h += `<br><span style="opacity:.6">Position at ${when}, shown ${SHIPS ? SHIPS.delay_min : 20} min late on purpose.<br>AIS via aisstream.io. MMSI ${esc(p.mmsi)}.</span>` +
+    `<br><a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:${encodeURIComponent(p.mmsi)}" target="_blank" rel="noopener">more on MarineTraffic ↗</a>`;
+  return h;
+}
+
 /* ---------- military aircraft ---------- */
 const AIRCRAFT_COLOR = { tanker: "#5ec8e5", isr: "#c792ff", transport: "#e6e4da", combat: "#ff5a5a", heli: "#7ed67e", other: "#f0f3fa" };
 let AIR = null;             // last /api/aircraft
@@ -1056,6 +1121,10 @@ $("#tg-rotate").addEventListener("change", e => { autoRotate.on = e.target.check
 
 /* ---------- controls ---------- */
 $("#tg-strikes").addEventListener("change", e => setStrikeVisibility(e.target.checked));
+$("#tg-ships").addEventListener("change", e => {
+  for (const id of ["ships", "ships-outline", "ship-trails"]) map.setLayoutProperty(id, "visibility", e.target.checked ? "visible" : "none");
+  if (e.target.checked) loadShips();
+});
 $("#tg-aircraft").addEventListener("change", e => {
   for (const id of ["aircraft", "aircraft-outline", "aircraft-trails", "aircraft-trails-casing"]) map.setLayoutProperty(id, "visibility", e.target.checked ? "visible" : "none");
   if (e.target.checked) loadAircraft();

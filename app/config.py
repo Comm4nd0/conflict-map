@@ -111,3 +111,21 @@ RELEVANCE_TERMS = [
     "islamic state", "wagner", "kremlin", "nato", "idf", "peacekeep", "junta", "armed", "casualt",
     "massacre", "genocide", "gaza", "ukraine", "sudan", "yemen", "myanmar", "sahel", "congo", "somalia",
 ]
+
+# Military ships (AIS via aisstream.io, free API key: https://aisstream.io). Off without a key.
+AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY", "")
+SHIPS_DELAY_MIN = int(os.environ.get("SHIPS_DELAY_MIN", "20"))       # same safety delay as aircraft
+SHIPS_TRAIL_MIN = int(os.environ.get("SHIPS_TRAIL_MIN", "180"))      # ships are slow: longer trails
+SHIPS_STALE_MIN = int(os.environ.get("SHIPS_STALE_MIN", "360"))      # drop a ship not heard from in 6 h
+# Only listen where it matters (keeps the global stream small on a 2-vCPU box). [[lat, lon], [lat, lon]] corners.
+SHIPS_BOXES = [
+    [[40.0, 27.0], [47.5, 42.0]],     # Black Sea
+    [[30.0, -6.0], [46.0, 36.5]],     # Mediterranean
+    [[11.0, 32.0], [30.0, 44.0]],     # Red Sea + Suez
+    [[10.0, 42.0], [30.5, 62.0]],     # Gulf of Aden, Arabian Sea, Persian Gulf, Hormuz
+    [[53.0, 9.0], [66.0, 31.0]],      # Baltic
+    [[49.0, -11.0], [62.0, 9.0]],     # North Sea, Channel
+    [[0.0, 105.0], [26.0, 125.0]],    # South China Sea
+    [[21.0, 117.0], [35.0, 132.0]],   # Taiwan Strait, East China Sea, Korea
+    [[10.0, -90.0], [27.0, -60.0]],   # Caribbean
+]

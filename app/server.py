@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import aircraft, countries, gdelt, pipeline, reader
+from . import aircraft, countries, ships, gdelt, pipeline, reader
 from .config import AIRCRAFT_ENABLED, GDELT_WINDOW_HOURS, REFRESH_MINUTES, SERVE_ONLY, STATIC_DIR
 from .db import all_conflicts, db, get_state
 
@@ -49,6 +49,7 @@ async def _loop():
 async def _start():
     if AIRCRAFT_ENABLED:
         threading.Thread(target=aircraft.run_forever, name="aircraft", daemon=True).start()
+    threading.Thread(target=ships.run_forever, name="ships", daemon=True).start()
     if SERVE_ONLY:
         log.info("SERVE_ONLY: viewer mode, no pipeline")
         return
@@ -121,6 +122,11 @@ def aircraft_view():
     if not AIRCRAFT_ENABLED:
         return {"enabled": False, "aircraft": []}
     return {"enabled": True, **aircraft.tracker.view()}
+
+
+@app.get("/api/ships")
+def ships_view():
+    return ships.fleet.view()
 
 
 @app.get("/api/countries")

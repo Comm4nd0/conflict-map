@@ -8,6 +8,10 @@ services:
     container_name: conflict-map-web
     ports:
       - "172.17.0.1:8030:8000"
+    # optional secrets (e.g. AISSTREAM_API_KEY for the ships layer) in /root/conflict-map/.env, not in git
+    env_file:
+      - path: .env
+        required: false
     environment:
       SERVE_ONLY: "1"
     volumes:
