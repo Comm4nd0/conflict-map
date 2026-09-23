@@ -48,7 +48,12 @@ button:disabled { opacity: .5; cursor: default; }
   background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%); }
 .mk.selected { box-shadow: 0 0 18px 4px currentColor; }
 .mk.selected::after { animation-duration: 1.4s; border-width: 3px; }
-#panel { width: 380px; border-left: 1px solid var(--border); background: var(--surface); overflow-y: auto; }
+#panel { width: 380px; min-width: 300px; max-width: 70vw; border-left: 1px solid var(--border); background: var(--surface); overflow-y: auto; flex: none; }
+#panel-resizer { width: 7px; margin-right: -7px; flex: none; cursor: col-resize; position: relative; z-index: 6; }
+#panel-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 3px; border-radius: 2px; background: transparent; transition: background .15s; }
+#panel-resizer:hover::after, body.resizing #panel-resizer::after { background: var(--st-active); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing #map { pointer-events: none; }
 
 /* list */
 .card { padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
@@ -189,6 +194,8 @@ button:disabled { opacity: .5; cursor: default; }
 
   /* the map fills the screen; the panel is a sheet over it */
   #main { display: block; }
+  #panel-resizer { display: none; }
+  #panel { width: auto !important; min-width: 0; max-width: none; }   /* ignore any desktop drag width */
   #map { position: absolute; inset: 0; }
   #panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; width: auto;
            height: 42%; border-left: none; border-top: 1px solid var(--border); border-radius: 14px 14px 0 0;
