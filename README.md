@@ -114,3 +114,12 @@ Deploy an update: `ssh luma 'cd /root/conflict-map && git pull --ff-only && dock
   the article it came from so claims can be checked.
 - Conflicts are never deleted automatically. `last_seen` is stored; stale ones can be
   filtered in the UI later.
+
+## Contributing
+
+Issues and pull requests are welcome: https://github.com/Comm4nd0/conflict-map
+
+The public site is a read-only viewer; the data pipeline (feeds, GDELT, local LLM
+extraction) runs on a separate machine. To work on it locally, run `./run.sh` with a
+local OpenAI-compatible model endpoint (`LLM_BASE`, `LLM_MODEL`), or run the viewer
+alone against any `data/conflict.db` with `SERVE_ONLY=1`.
