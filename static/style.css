@@ -134,6 +134,8 @@ button:disabled { opacity: .5; cursor: default; }
 .sw.w-ground { background: #e34948; } .sw.inc { background: #ec835a; opacity: .6; width: 7px; height: 7px; }
 .sw.w-missile { background: var(--w-missile);} .sw.w-drone { background: var(--w-drone);} .sw.w-airstrike { background: var(--w-airstrike);} .sw.w-artillery { background: var(--w-artillery);} .sw.w-naval { background: var(--w-naval);}
 #legend .muted { color: var(--muted); }
+#legend .plane { font-size: 12px; line-height: 1; }
+#aircraft-count { color: var(--muted); }
 .toggle.slider input[type=range] { width: 90px; accent-color: var(--st-active); }
 .toggle.slider span { min-width: 78px; }
 .strike { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; line-height: 1.4; cursor: pointer; }

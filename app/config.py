@@ -22,6 +22,17 @@ SERVE_ONLY = os.environ.get("SERVE_ONLY", "0") == "1"
 PUSH_TARGET = os.environ.get("PUSH_TARGET", "")
 ARTICLES_PER_BATCH = int(os.environ.get("ARTICLES_PER_BATCH", "40"))
 
+# Military aircraft layer (public ADS-B). Runs in both pipeline and SERVE_ONLY mode.
+AIRCRAFT_ENABLED = os.environ.get("AIRCRAFT_ENABLED", "1") == "1"
+# never serve positions fresher than this (don't publish live positions near fighting)
+AIRCRAFT_DELAY_MIN = int(os.environ.get("AIRCRAFT_DELAY_MIN", "20"))
+AIRCRAFT_TRAIL_MIN = int(os.environ.get("AIRCRAFT_TRAIL_MIN", "30"))
+AIRCRAFT_POLL_SECONDS = int(os.environ.get("AIRCRAFT_POLL_SECONDS", "60"))
+AIRCRAFT_SOURCES = [   # tried in order; both speak the readsb JSON format
+    ("airplanes.live", "https://api.airplanes.live/v2/mil"),
+    ("adsb.fi", "https://opendata.adsb.fi/api/v2/mil"),
+]
+
 FEEDS = {
     # wires / global
     "BBC World": "https://feeds.bbci.co.uk/news/world/rss.xml",

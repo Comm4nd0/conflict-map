@@ -46,9 +46,19 @@ who is backing whom, and what the consequences are.
    centroid with precision `country`. Precision is `city`, `approx` or `country` and is
    shown in the UI. On the map each strike replays as an animated projectile along a
    bent trajectory with an impact flash; a day slider filters to one day.
+7. **Military aircraft** – the server polls the public ADS-B aggregator
+   airplanes.live (`/v2/mil`, falling back to adsb.fi) once a minute and keeps the
+   history in memory. `/api/aircraft` only ever serves a snapshot at least
+   `AIRCRAFT_DELAY_MIN` (20) minutes old, with the last `AIRCRAFT_TRAIL_MIN` (30)
+   minutes as a trail, so the map never shows live positions near fighting. Aircraft
+   are coloured by role from their ICAO type code (tanker, surveillance, transport,
+   combat, helicopter). Only aircraft that broadcast ADS-B appear, which in practice
+   means support and surveillance flights, not combat missions. This runs on the
+   public viewer too (it does not go through the database); after a restart the layer
+   stays empty until the first delayed snapshot is available.
 
 Everything lives in `data/conflict.db` (SQLite). Nothing leaves the machine except
-the fetches to GDELT and the RSS feeds.
+the fetches to GDELT, the RSS feeds and the ADS-B aggregator.
 
 Rebuild the relief tiles (only needed if you change the colours in the script):
 
@@ -76,7 +86,8 @@ uv run python -m app.pipeline --skip-llm # just fetch data
 ```
 
 Env vars: `LLM_BASE`, `LLM_MODEL`, `GDELT_BACKFILL_HOURS` (48), `GDELT_WINDOW_HOURS`,
-`REFRESH_MINUTES` (30), `ARTICLES_PER_BATCH` (40).
+`REFRESH_MINUTES` (30), `ARTICLES_PER_BATCH` (40), `AIRCRAFT_ENABLED` (1),
+`AIRCRAFT_DELAY_MIN` (20), `AIRCRAFT_TRAIL_MIN` (30), `AIRCRAFT_POLL_SECONDS` (60).
 
 ## Public viewer (Luma001)
 

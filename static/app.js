@@ -294,6 +294,39 @@ map.on("load", async () => {
     openIncidentFeature(e.features[0]);
   });
 
+  // ---- military aircraft (public ADS-B, served with a delay)
+  map.addImage("plane", planeIcon(), { sdf: true, pixelRatio: 2 });
+  map.addSource("aircraft", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addSource("aircraft-trails", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  const acColor = ["match", ["get", "cat"], ...Object.entries(AIRCRAFT_COLOR).flat(), AIRCRAFT_COLOR.other];
+  map.addLayer({
+    id: "aircraft-trails", type: "line", source: "aircraft-trails",
+    paint: { "line-color": acColor, "line-width": 1.3, "line-opacity": 0.4 },
+  });
+  map.addLayer({
+    id: "aircraft", type: "symbol", source: "aircraft",
+    layout: {
+      "icon-image": "plane", "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.75, 6, 1],
+      "icon-rotate": ["coalesce", ["get", "track"], 0], "icon-rotation-alignment": "map",
+      "icon-allow-overlap": true, "icon-ignore-placement": true,
+      "text-field": ["step", ["zoom"], "", 4, ["coalesce", ["get", "flight"], ""]],
+      "text-font": ["Open Sans Regular"], "text-size": 10, "text-offset": [0, 1.3], "text-anchor": "top", "text-optional": true,
+    },
+    paint: { "icon-color": acColor, "icon-halo-color": "rgba(0,0,0,0.7)", "icon-halo-width": 1,
+             "text-color": "#c3c2b7", "text-halo-color": "#000", "text-halo-width": 1 },
+  });
+  map.on("mousemove", "aircraft", (e) => {
+    const tip = $("#tooltip");
+    tip.innerHTML = aircraftHtml(e.features[0].properties, false);
+    tip.hidden = false; tip.style.left = (e.point.x + 14) + "px"; tip.style.top = (e.point.y + 14) + "px";
+    map.getCanvas().style.cursor = "pointer";
+  });
+  map.on("mouseleave", "aircraft", () => { $("#tooltip").hidden = true; map.getCanvas().style.cursor = ""; });
+  map.on("click", "aircraft", (e) => {
+    e.originalEvent._handled = true;
+    openAircraftFeature(e.features[0]);
+  });
+
   // hover outline
   map.on("mousemove", "country-fill", (e) => {
     const iso = e.features[0].properties.ADM0_A3;
@@ -336,6 +369,8 @@ map.on("load", async () => {
   const shared = hashParam("c");
   if (shared && STATE.conflicts.find(c => c.id === shared)) select(shared, { keepView: true });
   setInterval(load, 60000);
+  loadAircraft();
+  setInterval(loadAircraft, 60000);
 });
 
 async function loadCountries() {
@@ -636,13 +671,68 @@ function openIncidentFeature(f) {
 function fuzzyTap(e) {
   if (!coarseMQ.matches || e.originalEvent._handled) return false;
   const r = 14, { x, y } = e.point;
-  const layers = ["strike-impacts", "incidents"].filter(id => map.getLayer(id) && map.getLayoutProperty(id, "visibility") !== "none");
+  const layers = ["aircraft", "strike-impacts", "incidents"].filter(id => map.getLayer(id) && map.getLayoutProperty(id, "visibility") !== "none");
   const hits = map.queryRenderedFeatures([[x - r, y - r], [x + r, y + r]], { layers });
   if (!hits.length) return false;
   e.originalEvent._handled = true;
-  const f = hits.find(h => h.layer.id === "strike-impacts") || hits[0];
-  if (f.layer.id === "strike-impacts") openStrikeFeature(f, e.lngLat); else openIncidentFeature(f);
+  const f = hits.find(h => h.layer.id === "aircraft") || hits.find(h => h.layer.id === "strike-impacts") || hits[0];
+  if (f.layer.id === "aircraft") openAircraftFeature(f);
+  else if (f.layer.id === "strike-impacts") openStrikeFeature(f, e.lngLat); else openIncidentFeature(f);
   return true;
+}
+
+/* ---------- military aircraft ---------- */
+const AIRCRAFT_COLOR = { tanker: "#5ec8e5", isr: "#c792ff", transport: "#e6e4da", combat: "#ff5a5a", heli: "#7ed67e", other: "#9aa4b5" };
+let AIR = null;             // last /api/aircraft
+/* top-down plane silhouette, nose up, drawn once as an SDF so the layer can tint it */
+function planeIcon() {
+  const n = 48, c = document.createElement("canvas"); c.width = c.height = n;
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.beginPath();
+  const pts = [[24, 3], [27, 9], [27, 19], [44, 29], [44, 33], [27, 28], [26, 38], [32, 43], [32, 46], [24, 43.5],
+               [16, 46], [16, 43], [22, 38], [21, 28], [4, 33], [4, 29], [21, 19], [21, 9]];
+  pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y));
+  g.closePath(); g.fill();
+  return g.getImageData(0, 0, n, n);
+}
+async function loadAircraft() {
+  if (!$("#tg-aircraft").checked || document.hidden) return;
+  try { AIR = await (await fetch("/api/aircraft")).json(); } catch (_) { return; }
+  const list = AIR.aircraft || [];
+  map.getSource("aircraft").setData({ type: "FeatureCollection", features: list.map(a => ({
+    type: "Feature", geometry: { type: "Point", coordinates: [a.lon, a.lat] },
+    properties: { ...a, trail: undefined },
+  })) });
+  map.getSource("aircraft-trails").setData({ type: "FeatureCollection", features: list.filter(a => a.trail.length > 1).map(a => {
+    const parts = [[a.trail[0]]];                  // break the trail where it crosses the antimeridian
+    for (let i = 1; i < a.trail.length; i++) {
+      if (Math.abs(a.trail[i][0] - a.trail[i - 1][0]) > 180) parts.push([]);
+      parts[parts.length - 1].push(a.trail[i]);
+    }
+    return { type: "Feature", properties: { cat: a.cat }, geometry: { type: "MultiLineString", coordinates: parts.filter(p => p.length > 1) } };
+  }) });
+  if (AIR.delay_min != null) $("#aircraft-note").textContent = `aircraft: public ADS-B (${AIR.source || "airplanes.live"}), ${AIR.delay_min} min delay, only those broadcasting`;
+  const lbl = $("#aircraft-count");
+  lbl.textContent = AIR.enabled === false ? "(off)" : AIR.warming_up_min ? "(…)" : `(${list.length})`;
+  lbl.parentElement.title = AIR.enabled === false ? "Aircraft layer is disabled on this server"
+    : AIR.warming_up_min ? `Collecting positions: first ones appear in ~${AIR.warming_up_min} min (shown with a ${AIR.delay_min}-min delay)`
+    : `Military aircraft broadcasting ADS-B, as of ${AIR.as_of ? new Date(AIR.as_of * 1000).toISOString().slice(11, 16) + " UTC" : "—"} (${AIR.delay_min}-min delay). Source: ${AIR.source || "none"}`;
+}
+function aircraftHtml(p, full = true) {
+  const fmt = (v, unit) => (v === undefined || v === null || v === "") ? null : `${Math.round(v).toLocaleString()} ${unit}`;
+  const title = p.flight || p.reg || String(p.hex).toUpperCase();
+  const bits = [fmt(p.alt, "ft"), fmt(p.gs, "kt"), p.track != null && p.track !== "" ? `heading ${Math.round(p.track)}°` : null].filter(Boolean);
+  let h = `<b>${esc(title)}</b> <span style="opacity:.6">${esc(p.type)}</span><br>${esc(p.name)}${p.reg && p.reg !== title ? ` · ${esc(p.reg)}` : ""}`;
+  if (bits.length) h += `<br>${bits.join(" · ")}`;
+  if (full) {
+    const when = AIR && AIR.as_of ? new Date(AIR.as_of * 1000).toISOString().slice(11, 16) + " UTC" : "";
+    h += `<br><span style="opacity:.6">Position at ${when}, shown ${AIR ? AIR.delay_min : 20} min late on purpose.<br>ADS-B via ${esc(AIR?.source || "airplanes.live")}. Only aircraft that choose to broadcast appear.</span>` +
+         `<br><a href="https://globe.airplanes.live/?icao=${encodeURIComponent(p.hex)}" target="_blank" rel="noopener">more on airplanes.live ↗</a>`;
+  }
+  return h;
+}
+function openAircraftFeature(f) {
+  $("#tooltip").hidden = true;
+  new maplibregl.Popup({ closeButton: true, maxWidth: "300px" }).setLngLat(f.geometry.coordinates).setHTML(aircraftHtml(f.properties)).addTo(map);
 }
 
 /* ---------- GDELT incidents ---------- */
@@ -815,6 +905,10 @@ $("#tg-rotate").addEventListener("change", e => { autoRotate.on = e.target.check
 
 /* ---------- controls ---------- */
 $("#tg-strikes").addEventListener("change", e => setStrikeVisibility(e.target.checked));
+$("#tg-aircraft").addEventListener("change", e => {
+  for (const id of ["aircraft", "aircraft-trails"]) map.setLayoutProperty(id, "visibility", e.target.checked ? "visible" : "none");
+  if (e.target.checked) loadAircraft();
+});
 $("#tg-incidents").addEventListener("change", e => map.setLayoutProperty("incidents", "visibility", e.target.checked ? "visible" : "none"));
 $("#day").addEventListener("input", () => {
   const d = dayFilter();

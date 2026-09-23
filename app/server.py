@@ -8,8 +8,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import countries, gdelt, pipeline, reader
-from .config import GDELT_WINDOW_HOURS, REFRESH_MINUTES, SERVE_ONLY, STATIC_DIR
+from . import aircraft, countries, gdelt, pipeline, reader
+from .config import AIRCRAFT_ENABLED, GDELT_WINDOW_HOURS, REFRESH_MINUTES, SERVE_ONLY, STATIC_DIR
 from .db import all_conflicts, db, get_state
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -47,6 +47,8 @@ async def _loop():
 
 @app.on_event("startup")
 async def _start():
+    if AIRCRAFT_ENABLED:
+        threading.Thread(target=aircraft.run_forever, name="aircraft", daemon=True).start()
     if SERVE_ONLY:
         log.info("SERVE_ONLY: viewer mode, no pipeline")
         return
@@ -112,6 +114,13 @@ async def article(url: str):
     if len(url) > 2000:
         return JSONResponse({"ok": False, "error": "bad url"}, status_code=400)
     return await asyncio.to_thread(reader.fetch, url)
+
+
+@app.get("/api/aircraft")
+def aircraft_view():
+    if not AIRCRAFT_ENABLED:
+        return {"enabled": False, "aircraft": []}
+    return {"enabled": True, **aircraft.tracker.view()}
 
 
 @app.get("/api/countries")
