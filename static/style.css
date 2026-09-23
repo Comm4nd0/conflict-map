@@ -105,6 +105,25 @@ body.resizing #map { pointer-events: none; }
 .src a:hover { color: var(--ink); }
 .src .s { color: var(--muted); }
 
+/* conflict stats */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin: 10px 0 12px; }
+.tile { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; }
+.tile .big { font-size: 22px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.tile .big .unit { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+.tile .lbl { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.tile .up { font-size: 12px; color: #e34948; } .tile .down { font-size: 12px; color: #0ca30c; } .tile .flat { font-size: 12px; color: var(--muted); }
+.figs { display: flex; flex-direction: column; gap: 8px; }
+.fig { padding: 8px 10px; border-left: 3px solid var(--st-active); background: var(--surface-2); border-radius: 0 6px 6px 0; cursor: pointer; }
+.fig:hover { border-left-color: var(--ink-2); }
+.fig .num { font-size: 18px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.fig .what { color: var(--ink-2); font-size: 13px; }
+.fig .per { color: var(--muted); font-size: 11px; margin-left: 6px; }
+.fig .claim { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #fab219; border: 1px solid rgba(250,178,25,.4); border-radius: 3px; padding: 0 4px; margin-left: 6px; }
+.fig .quote { font-size: 12.5px; color: var(--ink-2); font-style: italic; margin: 4px 0 3px; line-height: 1.45; }
+.fig .figsrc { font-size: 11px; color: var(--muted); }
+.fig .figsrc a { color: var(--muted); text-decoration: none; }
+.fignote { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
 /* reader */
 #reader { padding: 14px; }
 #reader .back { color: var(--muted); cursor: pointer; font-size: 12px; margin-bottom: 8px; display: inline-block; }

@@ -89,6 +89,15 @@ Env vars: `LLM_BASE`, `LLM_MODEL`, `GDELT_BACKFILL_HOURS` (48), `GDELT_WINDOW_HO
 `REFRESH_MINUTES` (30), `ARTICLES_PER_BATCH` (40), `AIRCRAFT_ENABLED` (1),
 `AIRCRAFT_DELAY_MIN` (20), `AIRCRAFT_TRAIL_MIN` (30), `AIRCRAFT_POLL_SECONDS` (60).
 
+## Conflict stats
+
+The top of each conflict panel shows how long it has lasted, attacks reported this week,
+press-reported clashes and outlets reporting. Below that, "Figures in recent reports"
+lists death tolls, displacement etc. as **verbatim quotes** from the linked articles, with who
+reported them, the period covered and a "party claim" tag when a warring side is the
+source. `app/stats.py` reads the full text of recent articles; a figure is kept only if
+its number and quote appear in the article. Refreshed per conflict at most every 12 h.
+
 ## Public viewer (Luma001)
 
 The Hetzner box has no GPU, so it only *serves* the map. The home machine runs the

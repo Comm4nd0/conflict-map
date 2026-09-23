@@ -468,6 +468,7 @@ map.on("load", async () => {
   });
 
   await loadCountries();
+  restoreSettings();          // before the first data load so the 24h/48h window is right
   await load();
   const shared = hashParam("c");
   if (shared && STATE.conflicts.find(c => c.id === shared)) select(shared, { keepView: true });
@@ -634,7 +635,6 @@ function setFocus(on) {
   map.setPaintProperty("heat", "heatmap-opacity", on ? 0.25 : 0.7);
   map.setPaintProperty("country-glow", "line-opacity", on ? 0.08 : 0.22);
   map.setPaintProperty("country-line", "line-color", on ? "rgba(210,225,255,0.08)" : "rgba(210,225,255,0.22)");
-  autoRotate.paused = on;
 }
 
 /* which conflicts is a country a party to? */
@@ -679,7 +679,9 @@ function renderDetail() {
     <span class="back">← all conflicts</span>
     <h2>${esc(c.name)}</h2>
     <div class="meta"><span class="badge st-${esc(c.status)}">${esc(c.status)}</span>${sevbar(c.severity)} <span>${esc(c.region || "")}</span></div>
+    ${statTiles(c)}
     <p class="summary">${esc(c.summary)}</p>
+    ${figureList(c)}
     <h3>Who is involved</h3>
     ${sideBlock("A", "Side A")}${sideBlock("B", "Side B")}${sideBlock("other", "Mediators / others")}
     <h3>Consequences</h3>
@@ -696,6 +698,10 @@ function renderDetail() {
     ${(c.sources || []).slice(0, 12).map(s => `<div class="src" data-url="${esc(s.link)}" data-title="${esc(s.title)}" data-source="${esc(s.source)}">${esc(s.title)} <span class="s">— ${esc(s.source)}</span> <a href="${esc(s.link)}" target="_blank" title="open original">↗</a></div>`).join("")}
   `;
   d.querySelector(".back").addEventListener("click", () => select(null));
+  d.querySelectorAll(".fig[data-url]").forEach(el => el.addEventListener("click", (ev) => {
+    if (ev.target.tagName === "A") return;
+    openArticle(el.dataset.url, { title: el.dataset.title, source: el.dataset.source });
+  }));
   d.querySelectorAll(".src").forEach(el => el.addEventListener("click", (ev) => {
     if (ev.target.tagName === "A") return;
     openArticle(el.dataset.url, { title: el.dataset.title, source: el.dataset.source });
@@ -715,12 +721,105 @@ function renderDetail() {
 
 function select(id, opts = {}) {
   selected = id;
+  if (id && $("#tg-rotate").checked) { $("#tg-rotate").checked = false; $("#tg-rotate").dispatchEvent(new Event("change")); }
   const c = STATE.conflicts.find(x => x.id === id);
   setHashParam("c", c ? c.id : null);
   if (c && isMobile() && $("#panel").dataset.sheet === "min") setSheet("peek");
   if (c && c.epicenter && !opts.keepView) map.flyTo({ center: [c.epicenter.lon, c.epicenter.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.55, curve: 1.3, essential: true, padding: sheetPadding() });
   renderMarkers(); renderArcs(); applyInvolvement(); renderStrikes();
   if (c) renderDetail(); else renderList();
+}
+
+/* ---------- remember settings across reloads (per browser) ---------- */
+const SETTINGS_KEY = "conflictMapSettings";
+const SETTING_IDS = ["tg-globe", "tg-rotate", "tg-night", "tg-heat", "tg-arcs", "tg-gdelt-arcs", "tg-strikes",
+                     "tg-incidents", "tg-aircraft", "tg-ships", "window"];
+function saveSettings() {
+  const out = {};
+  for (const id of SETTING_IDS) { const el = document.getElementById(id); if (el) out[id] = el.type === "checkbox" ? el.checked : el.value; }
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(out)); } catch (_) {}
+}
+function restoreSettings() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null"); } catch (_) {}
+  for (const id of SETTING_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener("change", saveSettings);
+    if (!saved || !(id in saved)) continue;
+    if (id === "tg-rotate" && sharedView) continue;           // a shared link keeps its own view still
+    const cur = el.type === "checkbox" ? el.checked : el.value;
+    if (cur === saved[id]) continue;
+    if (el.type === "checkbox") el.checked = saved[id]; else el.value = saved[id];
+    if (id !== "window") el.dispatchEvent(new Event("change"));   // apply it through the normal handler
+  }
+}
+
+/* ---------- conflict stats ---------- */
+const FIG_LABEL = {
+  killed: "killed", casualties: "killed + wounded", killed_civilians: "civilians killed", wounded: "wounded",
+  displaced: "displaced", refugees: "refugees", in_need: "need aid", hostages: "hostages", missing: "missing",
+};
+function fmtNum(v) {
+  if (v >= 1e6) return (v / 1e6).toFixed(v >= 1e7 ? 0 : 1).replace(/\.0$/, "") + "M";
+  if (v >= 1e4) return Math.round(v / 1e3) + "k";
+  return v.toLocaleString("en-GB");
+}
+function parseStart(d) {
+  const m = String(d || "").match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/);
+  return m ? { date: new Date(Date.UTC(+m[1], m[2] ? +m[2] - 1 : 0, m[3] ? +m[3] : 1)), precision: m[3] ? "day" : m[2] ? "month" : "year" } : null;
+}
+function durationText(start) {
+  const days = Math.floor((Date.now() - start.date.getTime()) / 86400000);
+  if (days < 60) return { big: `${days}`, unit: days === 1 ? "day" : "days" };
+  const years = days / 365.25;
+  if (years < 2) return { big: `${Math.round(days / 30.44)}`, unit: "months" };
+  return { big: years.toFixed(1).replace(/\.0$/, ""), unit: "years" };
+}
+function partyIsos(c) { return [...new Set(c.parties.map(p => norm(p.country)).filter(Boolean))]; }
+function statTiles(c) {
+  const tiles = [];
+  const st = c.stats || {};
+  const start = parseStart(st.started && st.started.date);
+  if (start) {
+    const dur = durationText(start);
+    const fmt = { day: { day: "numeric", month: "short", year: "numeric" }, month: { month: "short", year: "numeric" }, year: { year: "numeric" } }[start.precision];
+    const since = start.date.toLocaleDateString("en-GB", { ...fmt, timeZone: "UTC" });
+    tiles.push(`<div class="tile" title="${esc(st.started.event || "")}${st.started.basis === "background" ? " (start date from background knowledge, not a cited article)" : ""}">
+      <div class="big">${dur.big}<span class="unit"> ${dur.unit}</span></div><div class="lbl">since ${esc(since)}</div></div>`);
+  }
+  const a = c.activity || {};
+  if (a.attacks_7d || a.attacks_prev_7d) {
+    const diff = (a.attacks_7d || 0) - (a.attacks_prev_7d || 0);
+    const fullPrevWeek = STATE.meta.attacks_since && (Date.now() / 1000 - STATE.meta.attacks_since) > 14 * 86400;
+    const trend = !fullPrevWeek ? "" : diff > 0 ? `<span class="up">▲ ${diff}</span>` : diff < 0 ? `<span class="down">▼ ${-diff}</span>` : `<span class="flat">=</span>`;
+    tiles.push(`<div class="tile" title="Located attacks extracted from the news, this week vs the week before">
+      <div class="big">${a.attacks_7d || 0} ${trend}</div><div class="lbl">attacks reported, 7 days</div></div>`);
+  }
+  const isos = partyIsos(c);
+  const inc = (STATE.gdelt.incidents || []).filter(i => isos.includes(i.iso3)).reduce((n, i) => n + i.n, 0);
+  if (inc) tiles.push(`<div class="tile" title="GDELT fighting / mass-violence events located in the parties' countries (press attention, not a verified count)">
+      <div class="big">${fmtNum(inc)}</div><div class="lbl">press-reported clashes, ${STATE.gdelt.hours}h</div></div>`);
+  const outlets = new Set((c.sources || []).map(s => s.source)).size;
+  if (outlets) tiles.push(`<div class="tile" title="Distinct outlets among this conflict's recent sources"><div class="big">${outlets}</div><div class="lbl">outlets reporting</div></div>`);
+  return tiles.length ? `<div class="tiles">${tiles.join("")}</div>` : "";
+}
+function figureList(c) {
+  const figs = ((c.stats || {}).figures || []).slice().sort((x, y) => (y.cumulative === true) - (x.cumulative === true) || (y.as_of || "").localeCompare(x.as_of || ""));
+  if (!figs.length) return "";
+  const sideName = (side) => side === "A" || side === "B" ? (c.parties.find(p => p.side === side && p.role === "combatant") || {}).name || `side ${side}` : "";
+  const rows = figs.slice(0, 8).map(f => {
+    const who = sideName(f.side);
+    const period = f.cumulative ? "since the start" : f.period;
+    return `<div class="fig" data-url="${esc(f.link || "")}" data-title="${esc(f.title || "")}" data-source="${esc(f.source || "")}">
+      <div class="fighead"><span class="num">${fmtNum(f.value)}</span> <span class="what">${esc(FIG_LABEL[f.key] || f.key)}${who ? ` · ${esc(who)}` : ""}</span>
+        <span class="per">${esc(period)}</span>${f.claimant_is_party ? `<span class="claim" title="Figure published by one of the warring parties">party claim</span>` : ""}</div>
+      ${f.quote ? `<div class="quote">“${esc(f.quote)}”</div>` : ""}
+      <div class="figsrc">${esc(f.reported_by || "")}${f.as_of ? ` · ${esc(f.as_of)}` : ""} · ${esc(f.source || "")} <a href="${esc(f.link || "#")}" target="_blank" rel="noopener" title="open original">↗</a></div>
+    </div>`;
+  }).join("");
+  return `<h3>Figures in recent reports</h3><div class="figs">${rows}</div>
+    <div class="fignote">Quoted from the linked articles. Counts differ between sources and are often disputed.</div>`;
 }
 
 /* ---------- reader: show an article in the panel instead of leaving the site ---------- */
@@ -1101,24 +1200,36 @@ function updateNight() {
 }
 $("#tg-night").addEventListener("change", updateNight);
 
-/* ---------- globe / idle rotation ---------- */
-const autoRotate = { paused: false, lastInteraction: performance.now(), on: !sharedView };
+/* ---------- globe spin ----------
+   Starts the moment Spin is ticked, at any zoom. Dragging or zooming only holds it while your
+   hand is on the map (it carries on from wherever you leave the globe); selecting a conflict
+   turns Spin off, since the camera then flies to it. */
+const autoRotate = { on: false, holding: false };
 if (sharedView) $("#tg-rotate").checked = false;
+const spinWanted = () => $("#tg-rotate").checked && $("#tg-globe").checked;
 function rotateTick() {
-  const idle = performance.now() - autoRotate.lastInteraction > 8000;
-  if (autoRotate.on && !autoRotate.paused && idle && !selected && !document.hidden && map.getZoom() < 3.2) {
+  if (autoRotate.on && !autoRotate.holding && !document.hidden && !map.isEasing()) {
     const c = map.getCenter();
-    map.jumpTo({ center: [c.lng + 0.035, c.lat] });
+    const step = 0.05 * Math.pow(2, -Math.max(0, map.getZoom() - 2));   // same apparent speed at any zoom
+    map.jumpTo({ center: [c.lng + step, c.lat] });
   }
   requestAnimationFrame(rotateTick);
 }
-for (const ev of ["mousedown", "wheel", "touchstart", "dragstart", "zoomstart"]) map.on(ev, () => { autoRotate.lastInteraction = performance.now(); });
+const hold = () => { autoRotate.holding = true; };
+const release = () => { autoRotate.holding = false; };
+map.on("mousedown", hold); map.on("touchstart", hold);
+map.on("mouseup", release); map.on("touchend", release); map.on("touchcancel", release); map.on("dragend", release);
+window.addEventListener("mouseup", release);            // released outside the map
+let wheelTimer = null;
+map.getCanvas().addEventListener("wheel", () => { hold(); clearTimeout(wheelTimer); wheelTimer = setTimeout(release, 250); }, { passive: true });
+function syncSpin() { autoRotate.on = spinWanted(); }
 requestAnimationFrame(rotateTick);
 $("#tg-globe").addEventListener("change", e => {
   map.setProjection({ type: e.target.checked ? "globe" : "mercator" });
-  autoRotate.on = e.target.checked;
+  syncSpin();
 });
-$("#tg-rotate").addEventListener("change", e => { autoRotate.on = e.target.checked; });
+$("#tg-rotate").addEventListener("change", syncSpin);
+syncSpin();
 
 /* ---------- controls ---------- */
 $("#tg-strikes").addEventListener("change", e => setStrikeVisibility(e.target.checked));
