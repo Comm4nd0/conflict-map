@@ -161,13 +161,33 @@ map.on("load", async () => {
   map.addSource("night", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
     id: "night", type: "fill", source: "night",
-    paint: { "fill-color": "#02030c", "fill-opacity": ["get", "a"], "fill-antialias": false },
+    paint: { "fill-color": "#030718", "fill-opacity": ["get", "a"], "fill-antialias": false },
+  });
+  // a faint warm line where the sun is just setting/rising
+  map.addSource("terminator", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "terminator", type: "line", source: "terminator",
+    paint: { "line-color": "#ffb46b", "line-width": ["interpolate", ["linear"], ["zoom"], 1, 6, 6, 18],
+             "line-blur": ["interpolate", ["linear"], ["zoom"], 1, 6, 6, 16], "line-opacity": 0.14 },
+  });
+  // city lights: populated places glow only where it is dark (filter updated with the terminator)
+  map.addLayer({
+    id: "city-lights", type: "circle", source: "places", maxzoom: 7,
+    filter: ["boolean", false],
+    paint: {
+      "circle-color": "#ffd58a",
+      "circle-radius": ["interpolate", ["linear"], ["zoom"],
+        1, ["interpolate", ["linear"], ["coalesce", ["get", "pop_max"], 0], 0, 0.6, 1000000, 1.6, 20000000, 4],
+        6, ["interpolate", ["linear"], ["coalesce", ["get", "pop_max"], 0], 0, 2, 1000000, 6, 20000000, 14]],
+      "circle-blur": 0.9,
+      "circle-opacity": ["interpolate", ["linear"], ["coalesce", ["get", "pop_max"], 0], 0, 0.25, 500000, 0.55, 5000000, 0.85],
+    },
   });
   map.addSource("sun", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
     id: "sun", type: "circle", source: "sun",
-    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 14, 5, 40], "circle-color": "#ffe9a8",
-             "circle-opacity": 0.12, "circle-blur": 1 },
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 40, 5, 120], "circle-color": "#fff0c2",
+             "circle-opacity": 0.1, "circle-blur": 1 },
   });
   updateNight();
   setInterval(updateNight, 60000);
@@ -333,6 +353,8 @@ map.on("load", async () => {
   // ---- military aircraft (public ADS-B, served with a delay)
   map.addImage("plane", planeIcon(), { sdf: true, pixelRatio: 2 });
   map.addImage("plane-outline", planeIcon(true), { pixelRatio: 2 });
+  map.addImage("heli", heliIcon(), { sdf: true, pixelRatio: 2 });
+  map.addImage("heli-outline", heliIcon(true), { pixelRatio: 2 });
   map.addSource("aircraft", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addSource("aircraft-trails", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   const acColor = ["match", ["get", "cat"], ...Object.entries(AIRCRAFT_COLOR).flat(), AIRCRAFT_COLOR.other];
@@ -350,7 +372,7 @@ map.on("load", async () => {
   map.addLayer({
     id: "aircraft-outline", type: "symbol", source: "aircraft",
     layout: {
-      "icon-image": "plane-outline", "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.9, 6, 1.35],
+      "icon-image": ["match", ["get", "cat"], "heli", "heli-outline", "plane-outline"], "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.9, 6, 1.35],
       "icon-rotate": ["coalesce", ["get", "track"], 0], "icon-rotation-alignment": "map",
       "icon-allow-overlap": true, "icon-ignore-placement": true,
     },
@@ -358,7 +380,7 @@ map.on("load", async () => {
   map.addLayer({
     id: "aircraft", type: "symbol", source: "aircraft",
     layout: {
-      "icon-image": "plane", "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.9, 6, 1.35],
+      "icon-image": ["match", ["get", "cat"], "heli", "heli", "plane"], "icon-size": ["interpolate", ["linear"], ["zoom"], 1, 0.9, 6, 1.35],
       "icon-rotate": ["coalesce", ["get", "track"], 0], "icon-rotation-alignment": "map",
       "icon-allow-overlap": true, "icon-ignore-placement": true,
       "text-field": ["step", ["zoom"], "", 4, ["coalesce", ["get", "flight"], ""]],
@@ -765,6 +787,22 @@ function planeIcon(outline = false) {
   g.fill();
   return g.getImageData(0, 0, n, n);
 }
+/* top-down helicopter: rotor disc with two blades, fuselage, tail boom and tail rotor, nose up */
+function heliIcon(outline = false) {
+  const n = 48, c = document.createElement("canvas"); c.width = c.height = n;
+  const g = c.getContext("2d");
+  const ink = outline ? "rgba(0,0,0,0.9)" : "#fff";
+  g.strokeStyle = ink; g.fillStyle = ink; g.lineCap = "round";
+  const pad = outline ? 3 : 0;
+  // fuselage + tail boom + tail rotor
+  g.beginPath(); g.ellipse(24, 20, 6 + pad, 9 + pad, 0, 0, Math.PI * 2); g.fill();
+  g.lineWidth = 3 + pad * 2; g.beginPath(); g.moveTo(24, 27); g.lineTo(24, 42); g.stroke();
+  g.lineWidth = 2.5 + pad * 2; g.beginPath(); g.moveTo(19, 42); g.lineTo(29, 42); g.stroke();
+  // main rotor: two crossed blades + faint disc
+  g.lineWidth = 2.5 + pad * 2; g.beginPath(); g.moveTo(6, 8); g.lineTo(42, 32); g.moveTo(42, 8); g.lineTo(6, 32); g.stroke();
+  if (!outline) { g.globalAlpha = 0.35; g.lineWidth = 1.5; g.beginPath(); g.arc(24, 20, 21, 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1; }
+  return g.getImageData(0, 0, n, n);
+}
 async function loadAircraft() {
   if (!$("#tg-aircraft").checked || document.hidden) return;
   try { AIR = await (await fetch("/api/aircraft")).json(); } catch (_) { return; }
@@ -930,29 +968,69 @@ function subsolarPoint(date = new Date()) {
   let lon = -(utc - 12) * 15 - eqt; lon = ((lon + 540) % 360) - 180;
   return { lat: decl / rad, lon };
 }
-function nightPolygon(sun, altitudeDeg) {
-  const rad = Math.PI / 180, decl = sun.lat * rad, h = altitudeDeg * rad;
-  const ring = [];
-  for (let lon = -180; lon <= 180; lon += 2) {
-    const H = (lon - sun.lon) * rad;
-    const A = Math.sin(decl), B = Math.cos(decl) * Math.cos(H);
-    const R = Math.hypot(A, B), th = Math.atan2(B, A);
-    let phi = Math.asin(Math.max(-1, Math.min(1, Math.sin(h) / R))) - th;   // latitude where the sun sits at `altitude`
-    phi = Math.max(-89.9 * rad, Math.min(89.9 * rad, phi));
-    ring.push([lon, phi / rad]);
-  }
-  const pole = sun.lat > 0 ? -89.9 : 89.9;                           // the pole opposite the sun's declination is dark
-  ring.push([180, pole], [-180, pole], ring[0]);
-  return ring;
+// Darkness from the sun's altitude (deg): 0 at +1°, deepening through civil (-6), nautical (-12)
+// and astronomical (-18) twilight. Computed per 2° grid cell, so it is right in every season
+// (a single polygon closed over a pole is wrong around the equinoxes).
+const NIGHT_MAX = 0.62, NIGHT_CELL = 2;
+function darkness(altDeg) {
+  const t = Math.min(1, Math.max(0, (1 - altDeg) / 19));      // 0 at +1°, 1 at -18°
+  return NIGHT_MAX * t * t * (3 - 2 * t);                      // smoothstep
+}
+function sunAltitude(lat, lon, sun) {
+  const r = Math.PI / 180;
+  const s = Math.sin(lat * r) * Math.sin(sun.lat * r) + Math.cos(lat * r) * Math.cos(sun.lat * r) * Math.cos((lon - sun.lon) * r);
+  return Math.asin(Math.max(-1, Math.min(1, s))) / r;
+}
+/* the same altitude as a style expression over a feature's latitude/longitude properties */
+function altitudeExpr(sun) {
+  const r = Math.PI / 180, sd = Math.sin(sun.lat * r), cd = Math.cos(sun.lat * r);
+  const lat = ["*", ["get", "latitude"], r], dlon = ["*", ["-", ["get", "longitude"], sun.lon], r];
+  return ["/", ["asin", ["max", -1, ["min", 1, ["+", ["*", ["sin", lat], sd], ["*", ["*", ["cos", lat], cd], ["cos", dlon]]]]]], r];
 }
 function updateNight() {
   if (!map.getSource("night")) return;
-  if (!$("#tg-night").checked) { map.getSource("night").setData({ type: "FeatureCollection", features: [] }); map.getSource("sun").setData({ type: "FeatureCollection", features: [] }); return; }
-  const sun = subsolarPoint();
-  const feats = [[0, 0.22], [-6, 0.18], [-12, 0.16]].map(([alt, a]) => ({
-    type: "Feature", properties: { a }, geometry: { type: "Polygon", coordinates: [nightPolygon(sun, alt)] },
-  }));
-  map.getSource("night").setData({ type: "FeatureCollection", features: feats });
+  const empty = { type: "FeatureCollection", features: [] };
+  const on = $("#tg-night").checked;
+  map.setLayoutProperty("city-lights", "visibility", on ? "visible" : "none");
+  if (!on) { for (const id of ["night", "sun", "terminator"]) map.getSource(id).setData(empty); return; }
+  const sun = subsolarPoint(), c = NIGHT_CELL;
+  const cells = [];
+  for (let lat = -90; lat < 90; lat += c) {
+    for (let lon = -180; lon < 180; lon += c) {
+      const a = darkness(sunAltitude(lat + c / 2, lon + c / 2, sun));
+      if (a < 0.004) continue;
+      cells.push({ type: "Feature", properties: { a: Math.round(a * 1000) / 1000 },
+        geometry: { type: "Polygon", coordinates: [[[lon, lat], [lon + c, lat], [lon + c, lat + c], [lon, lat + c], [lon, lat]]] } });
+    }
+  }
+  map.getSource("night").setData({ type: "FeatureCollection", features: cells });
+  // terminator glow: for each longitude, the latitude where the sun sits at -0.8° (bisection, correct any season)
+  const segs = [[]];
+  for (let lon = -180; lon <= 180; lon += 1) {
+    const f = (lat) => sunAltitude(lat, lon, sun) + 0.8;
+    let lo = -89.5, hi = 89.5;
+    if (Math.sign(f(lo)) === Math.sign(f(hi))) { if (segs[segs.length - 1].length) segs.push([]); continue; }
+    for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; (Math.sign(f(m)) === Math.sign(f(lo))) ? lo = m : hi = m; }
+    segs[segs.length - 1].push([lon, (lo + hi) / 2]);
+  }
+  // near the equinoxes the terminator runs almost pole to pole along two meridians; add those as their own lines
+  const meridians = [];
+  for (const dl of [-90, 90]) {
+    const lon = ((sun.lon + dl + 540) % 360) - 180, line = [];
+    for (let lat = -89; lat <= 89; lat += 1) {
+      const alt = sunAltitude(lat, lon, sun);
+      if (Math.abs(alt + 0.8) < 3) line.push([lon, lat]); else if (line.length > 1) { meridians.push(line.splice(0)); } else line.length = 0;
+    }
+    if (line.length > 1) meridians.push(line);
+  }
+  const lines = segs.filter(x => x.length > 1).concat(meridians);
+  map.getSource("terminator").setData({ type: "FeatureCollection", features: lines.map(l => ({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: l } })) });
+  // city lights fade in through civil twilight and are gone in daylight
+  const alt = altitudeExpr(sun);
+  map.setFilter("city-lights", ["<", alt, -1]);
+  map.setPaintProperty("city-lights", "circle-opacity", ["*",
+    ["interpolate", ["linear"], alt, -8, 1, -1, 0],
+    ["interpolate", ["linear"], ["coalesce", ["get", "pop_max"], 0], 0, 0.25, 500000, 0.55, 5000000, 0.85]]);
   map.getSource("sun").setData({ type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [sun.lon, sun.lat] } }] });
 }
 $("#tg-night").addEventListener("change", updateNight);
