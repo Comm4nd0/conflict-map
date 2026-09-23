@@ -75,6 +75,10 @@ def update(max_files: int | None = None):
                 log.warning("%s: %s", stamp, e)
                 continue
             if resp.status_code == 404:
+                # files appear a few minutes after their timestamp: only give up on one that is hours overdue
+                age_h = (datetime.now(timezone.utc) - datetime.strptime(stamp, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)).total_seconds() / 3600
+                if age_h < 3:
+                    continue
                 rows = []
             elif resp.status_code != 200:
                 log.warning("%s: HTTP %s", stamp, resp.status_code)
