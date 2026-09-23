@@ -141,3 +141,10 @@ The public site is a read-only viewer; the data pipeline (feeds, GDELT, local LL
 extraction) runs on a separate machine. To work on it locally, run `./run.sh` with a
 local OpenAI-compatible model endpoint (`LLM_BASE`, `LLM_MODEL`), or run the viewer
 alone against any `data/conflict.db` with `SERVE_ONLY=1`.
+
+## License
+
+Code: MIT, see `LICENSE`. Third-party data keeps its own terms: Natural Earth (public
+domain), GDELT, news articles (linked and quoted, not redistributed), ADS-B via adsb.fi /
+airplanes.live, AIS via aisstream.io. MapLibre GL JS (BSD-3-Clause) and Open Sans (OFL) are
+vendored under `static/`.
