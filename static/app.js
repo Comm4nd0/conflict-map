@@ -421,6 +421,9 @@ map.on("load", async () => {
   const shared = hashParam("c");
   if (shared && STATE.conflicts.find(c => c.id === shared)) select(shared, { keepView: true });
   setInterval(load, 60000);
+  // off by default: start the aircraft layers hidden until the toggle is ticked
+  for (const id of ["aircraft", "aircraft-outline", "aircraft-trails", "aircraft-trails-casing"])
+    map.setLayoutProperty(id, "visibility", $("#tg-aircraft").checked ? "visible" : "none");
   loadAircraft();
   setInterval(loadAircraft, 60000);
 });
