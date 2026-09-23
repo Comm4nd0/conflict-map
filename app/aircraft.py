@@ -8,13 +8,17 @@ Trails come from the same history.
 Only aircraft that choose to broadcast show up: tankers, ISR, transports, some patrol
 planes. Combat aircraft on missions generally fly with transponders off.
 """
+import gzip
+import json
 import logging
+import os
 import threading
 import time
 from collections import deque
 
 import httpx
 
+from .config import DATA_DIR
 from .config import (AIRCRAFT_BACKOFF_SECONDS, AIRCRAFT_DELAY_MIN, AIRCRAFT_POLL_SECONDS, AIRCRAFT_SOURCES,
                      AIRCRAFT_TRAIL_MIN)
 
@@ -158,6 +162,39 @@ class Tracker:
             self.hist.append((ts, snap))
             while self.hist and ts - self.hist[0][0] > keep:
                 self.hist.popleft()
+        self.save()
+
+    # ---- persistence: survive restarts/deploys without a fresh warm-up
+    def save(self):
+        """Atomic write (tmp + rename) so a crash never leaves a half-written file."""
+        with self.lock:
+            data = [[ts, snap] for ts, snap in self.hist]
+        tmp = HISTORY_FILE.with_suffix(".tmp")
+        try:
+            HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with gzip.open(tmp, "wt", encoding="utf-8", compresslevel=5) as f:
+                json.dump({"v": 1, "hist": data}, f, separators=(",", ":"))
+            os.replace(tmp, HISTORY_FILE)
+        except OSError as e:
+            log.warning("could not save aircraft history: %s", e)
+
+    def load(self):
+        keep = (AIRCRAFT_DELAY_MIN + AIRCRAFT_TRAIL_MIN + 5) * 60
+        now = time.time()
+        try:
+            with gzip.open(HISTORY_FILE, "rt", encoding="utf-8") as f:
+                data = json.load(f).get("hist") or []
+        except FileNotFoundError:
+            return 0
+        except (OSError, ValueError, EOFError) as e:
+            log.warning("ignoring unreadable aircraft history: %s", e)
+            return 0
+        rows = sorted((float(ts), snap) for ts, snap in data if now - float(ts) <= keep and isinstance(snap, dict))
+        with self.lock:
+            self.hist = deque(rows)
+        if rows:
+            log.info("restored %d aircraft snapshots (%.0f min of history)", len(rows), (now - rows[0][0]) / 60)
+        return len(rows)
 
     def view(self, now: float | None = None) -> dict:
         """The newest snapshot at least the delay old, plus trails leading up to it."""
@@ -186,10 +223,12 @@ class Tracker:
         return {**meta, "as_of": int(as_of), "warming_up_min": None, "aircraft": aircraft}
 
 
+HISTORY_FILE = DATA_DIR / "aircraft-history.json.gz"
 tracker = Tracker()
 
 
 def run_forever(stop: threading.Event | None = None):
+    tracker.load()
     while not (stop and stop.is_set()):
         n = tracker.poll()
         if n is not None:
