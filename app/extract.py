@@ -326,13 +326,26 @@ def run_batch(limit: int = ARTICLES_PER_BATCH) -> int:
                                               "source": a["source"], "published": a["published"]}
                         d.setdefault("sources", []).append(a["link"])
             c["sources"] = sorted(sources.values(), key=lambda s: -s["published"])[:20]
-            # the model tends to restate earlier developments; keep the first of each near-identical text
-            seen, devs = set(), []
-            for d in sorted(c.get("developments", []), key=lambda d: d.get("date", ""), reverse=True):
-                key = re.sub(r"[^a-z0-9]+", " ", (d.get("text") or "").lower()).strip()[:70]
-                if key and key not in seen:
-                    seen.add(key)
-                    devs.append(d)
+            # the model restates earlier developments (it only ever sees their text), so carry their
+            # article links over from the stored copy, then keep one of each near-identical text
+            dkey = lambda d: re.sub(r"[^a-z0-9]+", " ", (d.get("text") or "").lower()).strip()[:70]
+            prev_src = {}
+            for d in prev.get("developments", []):
+                if d.get("sources"):
+                    prev_src.setdefault(dkey(d), d["sources"])
+            seen, devs = {}, []
+            for d in sorted(c.get("developments", []) + prev.get("developments", []), key=lambda d: d.get("date", ""), reverse=True):
+                k = dkey(d)
+                if not k:
+                    continue
+                if not d.get("sources") and k in prev_src:
+                    d["sources"] = prev_src[k]
+                if k in seen:
+                    if d.get("sources") and not seen[k].get("sources"):
+                        seen[k]["sources"] = d["sources"]
+                    continue
+                seen[k] = d
+                devs.append(d)
             c["developments"] = devs[:8]
             c["last_seen"] = int(time.time())
             c["first_seen"] = prev.get("first_seen", int(time.time()))

@@ -707,8 +707,9 @@ function renderDetail() {
   d.querySelectorAll(".strike").forEach(el => el.addEventListener("click", () => {
     const st = STATE.strikes.find(x => x.id === +el.dataset.id);
     if (!st) return;
-    if (isMobile() && $("#panel").dataset.sheet === "full") setSheet("peek");
     map.flyTo({ center: [st.target_lon, st.target_lat], zoom: Math.max(map.getZoom(), 5.5), speed: 0.9, padding: sheetPadding() });
+    if (st.link) openArticle(st.link, { title: st.title, source: st.source, context: strikeHtml(st) });   // show the report too
+    else if (isMobile() && $("#panel").dataset.sheet === "full") setSheet("peek");
   }));
 }
 
