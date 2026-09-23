@@ -936,6 +936,30 @@ map.on("click", (e) => {
   if (selected) select(null);
 });
 
+/* ---------- desktop: drag the panel edge to resize ---------- */
+(() => {
+  const handle = $("#panel-resizer"), panel = $("#panel");
+  if (!handle) return;
+  const clamp = (w) => Math.max(300, Math.min(window.innerWidth * 0.7, w));
+  try { const saved = +localStorage.getItem("panelWidth"); if (saved) panel.style.width = clamp(saved) + "px"; } catch (_) {}
+  let dragging = false;
+  handle.addEventListener("pointerdown", (e) => {
+    if (isMobile()) return;
+    dragging = true; handle.setPointerCapture(e.pointerId); document.body.classList.add("resizing"); e.preventDefault();
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    panel.style.width = clamp(window.innerWidth - e.clientX) + "px";
+  });
+  const stop = () => {
+    if (!dragging) return;
+    dragging = false; document.body.classList.remove("resizing");
+    try { localStorage.setItem("panelWidth", String(panel.getBoundingClientRect().width | 0)); } catch (_) {}
+  };
+  handle.addEventListener("pointerup", stop); handle.addEventListener("pointercancel", stop);
+  handle.addEventListener("dblclick", () => { panel.style.width = ""; try { localStorage.removeItem("panelWidth"); } catch (_) {} });
+})();
+
 /* ---------- mobile: layers menu, legend, bottom sheet ---------- */
 function toggleMenu(on = !document.body.classList.contains("menu-open")) {
   document.body.classList.toggle("menu-open", on);
